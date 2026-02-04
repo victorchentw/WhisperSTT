@@ -1,0 +1,5 @@
+recordings/
+tmp/
+__pycache__/
+*.wav
+*.txt
