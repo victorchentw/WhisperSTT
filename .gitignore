@@ -1,0 +1,30 @@
+.DS_Store
+
+# Xcode
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcuserdatad/
+*.moved-aside
+*.xcscmblueprint
+
+# SwiftPM
+.build/
+.swiftpm/
+
+# Android / Gradle
+**/build/
+**/.gradle/
+local.properties
+*.iml
+.idea/
+
+# Python
+.venv/
+
+# Local clones
+WhisperKit/
+whisper/
+
+# Large model archives
+WhisperAndroid/app/src/main/assets/models/whisper/tiny/*.tar.bz2

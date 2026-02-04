@@ -1,0 +1,299 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 60;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0361E0D8183CBC6B3EA892AC /* Models/tokenizers/openai-whisper-tiny in Resources */ = {isa = PBXBuildFile; fileRef = F052BA8D70DE2E22291AEF34 /* Models/tokenizers/openai-whisper-tiny */; };
+		4D5A8BF33980D5A79544D8F0 /* WhisperKit in Frameworks */ = {isa = PBXBuildFile; productRef = 935F2DB0C2CE248047F14182 /* WhisperKit */; };
+		7FDB2696241D05608A903B02 /* Models/whisperkit-coreml/openai_whisper-tiny in Resources */ = {isa = PBXBuildFile; fileRef = 74F6956F8EAACF307FB349CC /* Models/whisperkit-coreml/openai_whisper-tiny */; };
+		A1B2C3D4E5F60718293A4B80 /* WhisperiOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B70 /* WhisperiOSApp.swift */; };
+		A1B2C3D4E5F60718293A4B81 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B71 /* ContentView.swift */; };
+		A1B2C3D4E5F60718293A4B82 /* AudioRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B72 /* AudioRecorder.swift */; };
+		A1B2C3D4E5F60718293A4B83 /* TTSService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B73 /* TTSService.swift */; };
+		A1B2C3D4E5F60718293A4B84 /* WhisperEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B74 /* WhisperEngine.swift */; };
+		A1B2C3D4E5F60718293A4B85 /* PerformanceMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B75 /* PerformanceMetrics.swift */; };
+		A1B2C3D4E5F60718293A4B86 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B76 /* Assets.xcassets */; };
+		A1B2C3D4E5F60718293A4B87 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B77 /* LaunchScreen.storyboard */; };
+		CFBB9D4F6D1CCC995D809639 /* StreamingTranscriber.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4D59ED01573AC49D1BCD67E /* StreamingTranscriber.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		74F6956F8EAACF307FB349CC /* Models/whisperkit-coreml/openai_whisper-tiny */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "whisperkit-coreml/openai_whisper-tiny"; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B69 /* WhisperiOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WhisperiOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1B2C3D4E5F60718293A4B70 /* WhisperiOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperiOSApp.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B71 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B72 /* AudioRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorder.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B73 /* TTSService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSService.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B74 /* WhisperEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperEngine.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B75 /* PerformanceMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceMetrics.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B76 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B77 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B78 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		D4D59ED01573AC49D1BCD67E /* StreamingTranscriber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingTranscriber.swift; sourceTree = "<group>"; };
+		F052BA8D70DE2E22291AEF34 /* Models/tokenizers/openai-whisper-tiny */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "tokenizers/openai-whisper-tiny"; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A1B2C3D4E5F60718293A4B68 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4D5A8BF33980D5A79544D8F0 /* WhisperKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A1B2C3D4E5F60718293A4B5D = {
+			isa = PBXGroup;
+			children = (
+				A1B2C3D4E5F60718293A4B79 /* WhisperiOS */,
+				A1B2C3D4E5F60718293A4B5E /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A1B2C3D4E5F60718293A4B5E /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A1B2C3D4E5F60718293A4B69 /* WhisperiOS.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		A1B2C3D4E5F60718293A4B79 /* WhisperiOS */ = {
+			isa = PBXGroup;
+			children = (
+				A1B2C3D4E5F60718293A4B70 /* WhisperiOSApp.swift */,
+				A1B2C3D4E5F60718293A4B71 /* ContentView.swift */,
+				A1B2C3D4E5F60718293A4B72 /* AudioRecorder.swift */,
+				D4D59ED01573AC49D1BCD67E /* StreamingTranscriber.swift */,
+				A1B2C3D4E5F60718293A4B73 /* TTSService.swift */,
+				A1B2C3D4E5F60718293A4B74 /* WhisperEngine.swift */,
+				A1B2C3D4E5F60718293A4B75 /* PerformanceMetrics.swift */,
+				A5EBFD723D73938AB7B9256B /* Models */,
+				A1B2C3D4E5F60718293A4B7A /* Resources */,
+				A1B2C3D4E5F60718293A4B76 /* Assets.xcassets */,
+			);
+			path = WhisperiOS;
+			sourceTree = "<group>";
+		};
+		A1B2C3D4E5F60718293A4B7A /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				A1B2C3D4E5F60718293A4B78 /* Info.plist */,
+				A1B2C3D4E5F60718293A4B77 /* LaunchScreen.storyboard */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		A5EBFD723D73938AB7B9256B /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				74F6956F8EAACF307FB349CC /* Models/whisperkit-coreml/openai_whisper-tiny */,
+				F052BA8D70DE2E22291AEF34 /* Models/tokenizers/openai-whisper-tiny */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A1B2C3D4E5F60718293A4B5F /* WhisperiOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1B2C3D4E5F60718293A4B61 /* Build configuration list for PBXNativeTarget "WhisperiOS" */;
+			buildPhases = (
+				A1B2C3D4E5F60718293A4B66 /* Sources */,
+				A1B2C3D4E5F60718293A4B67 /* Resources */,
+				A1B2C3D4E5F60718293A4B68 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = WhisperiOS;
+			packageProductDependencies = (
+				935F2DB0C2CE248047F14182 /* WhisperKit */,
+			);
+			productName = WhisperiOS;
+			productReference = A1B2C3D4E5F60718293A4B69 /* WhisperiOS.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A1B2C3D4E5F60718293A4B5C /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					A1B2C3D4E5F60718293A4B5F = {
+						CreatedOnToolsVersion = 15.0;
+					};
+				};
+			};
+			buildConfigurationList = A1B2C3D4E5F60718293A4B60 /* Build configuration list for PBXProject "WhisperiOS" */;
+			compatibilityVersion = "Xcode 15.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A1B2C3D4E5F60718293A4B5D;
+			packageReferences = (
+				2C2DFF97A770104C9602FA8A /* XCRemoteSwiftPackageReference "WhisperKit" */,
+			);
+			productRefGroup = A1B2C3D4E5F60718293A4B5E /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A1B2C3D4E5F60718293A4B5F /* WhisperiOS */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A1B2C3D4E5F60718293A4B67 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7FDB2696241D05608A903B02 /* Models/whisperkit-coreml/openai_whisper-tiny in Resources */,
+				0361E0D8183CBC6B3EA892AC /* Models/tokenizers/openai-whisper-tiny in Resources */,
+				A1B2C3D4E5F60718293A4B86 /* Assets.xcassets in Resources */,
+				A1B2C3D4E5F60718293A4B87 /* LaunchScreen.storyboard in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A1B2C3D4E5F60718293A4B66 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1B2C3D4E5F60718293A4B80 /* WhisperiOSApp.swift in Sources */,
+				A1B2C3D4E5F60718293A4B81 /* ContentView.swift in Sources */,
+				A1B2C3D4E5F60718293A4B82 /* AudioRecorder.swift in Sources */,
+				CFBB9D4F6D1CCC995D809639 /* StreamingTranscriber.swift in Sources */,
+				A1B2C3D4E5F60718293A4B83 /* TTSService.swift in Sources */,
+				A1B2C3D4E5F60718293A4B84 /* WhisperEngine.swift in Sources */,
+				A1B2C3D4E5F60718293A4B85 /* PerformanceMetrics.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A1B2C3D4E5F60718293A4B62 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Debug;
+		};
+		A1B2C3D4E5F60718293A4B63 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Release;
+		};
+		A1B2C3D4E5F60718293A4B64 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = R2H967U7J8;
+				INFOPLIST_FILE = WhisperiOS/Resources/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.WhisperiOS;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		A1B2C3D4E5F60718293A4B65 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = R2H967U7J8;
+				INFOPLIST_FILE = WhisperiOS/Resources/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.WhisperiOS;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A1B2C3D4E5F60718293A4B60 /* Build configuration list for PBXProject "WhisperiOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1B2C3D4E5F60718293A4B62 /* Debug */,
+				A1B2C3D4E5F60718293A4B63 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A1B2C3D4E5F60718293A4B61 /* Build configuration list for PBXNativeTarget "WhisperiOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1B2C3D4E5F60718293A4B64 /* Debug */,
+				A1B2C3D4E5F60718293A4B65 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		2C2DFF97A770104C9602FA8A /* XCRemoteSwiftPackageReference "WhisperKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/argmaxinc/WhisperKit.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.9.4;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		935F2DB0C2CE248047F14182 /* WhisperKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 2C2DFF97A770104C9602FA8A /* XCRemoteSwiftPackageReference "WhisperKit" */;
+			productName = WhisperKit;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = A1B2C3D4E5F60718293A4B5C /* Project object */;
+}
