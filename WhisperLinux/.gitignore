@@ -1,5 +1,8 @@
 recordings/
 tmp/
+build/
+bin/
+third_party/
 __pycache__/
 *.wav
 *.txt

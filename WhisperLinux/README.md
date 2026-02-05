@@ -1,23 +1,28 @@
 # WhisperLinux (CLI)
 
-Offline STT CLI for Linux using PulseAudio capture and whisper.cpp.
+Offline STT CLI for Linux using PulseAudio capture and **whisper.cpp embedded in a single executable**.
 
-## Requirements
+## Requirements (build machine)
 - PulseAudio utilities: `pactl`, `parec`
-- Python 3
-- whisper.cpp binary + model file
+- `cmake`, `g++`, `xxd` (vim-common)
+- git
 
-## Setup (example)
-1. Build whisper.cpp (from https://github.com/ggml-org/whisper.cpp)
-2. The model `models/ggml-tiny.bin` is already included.
-3. Run the CLI:
+## Build
+The model `models/ggml-tiny.bin` is already included and will be **embedded into the binary**.
 
 ```bash
-./whisper_cli.py
+./build_linux.sh
+```
+
+Output: `bin/whisper_cli` (single executable you can copy to other Ubuntu machines).
+
+## Run
+```bash
+./bin/whisper_cli
 ```
 
 ## Notes
-- Use **system audio** to capture speaker output (monitor source).
-- Use **microphone** to capture mic input.
-- For streaming, the app runs chunk+overlap decoding (default 4s / 1s).
-- If your whisper.cpp binary uses different flags, edit the command template when prompted.
+- Uses PulseAudio (`pactl` + `parec`) to list sources and capture.
+- **System audio** uses the default sink monitor (like kazam “sound from speakers”).
+- **Microphone** uses any available input source.
+- Streaming uses chunk + overlap (default 4s / 1s).
