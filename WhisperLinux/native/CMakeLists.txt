@@ -18,7 +18,7 @@ set(MODEL_HEADER "${CMAKE_BINARY_DIR}/model_data.h")
 
 add_custom_command(
     OUTPUT ${MODEL_HEADER}
-    COMMAND xxd -i -n whisper_model ${MODEL_PATH} ${MODEL_HEADER}
+    COMMAND /bin/sh -c "xxd -i '${MODEL_PATH}' | sed -e 's/^unsigned char .*\\[/unsigned char whisper_model[/' -e 's/^unsigned int .*_len/unsigned int whisper_model_len/' > '${MODEL_HEADER}'"
     DEPENDS ${MODEL_PATH}
     VERBATIM
 )
