@@ -387,7 +387,7 @@ int main() {
 
     std::string save_title = prompt_string("Save title", "transcript");
 
-    std::string mode = prompt_choice("Mode", {"streaming", "clip"}, 1);
+    std::string mode = prompt_choice("Mode", {"streaming", "clip"}, 0);
     std::string input_type = prompt_choice(
         "Input source", {"microphone", "system audio (speaker monitor)", "choose source"}, 0);
 
@@ -415,7 +415,8 @@ int main() {
         return 1;
     }
 
-    whisper_context *ctx = whisper_init_from_file(model_path.c_str());
+    whisper_context_params cparams = whisper_context_default_params();
+    whisper_context *ctx = whisper_init_from_file_with_params(model_path.c_str(), cparams);
     if (!ctx) {
         print_error("Failed to init whisper context.");
         std::remove(model_path.c_str());
