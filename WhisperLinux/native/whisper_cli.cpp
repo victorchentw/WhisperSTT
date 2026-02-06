@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cctype>
 #include <csignal>
+#include <ctime>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -13,6 +14,8 @@
 #include <thread>
 #include <vector>
 #include <unistd.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #include "whisper.h"
 #include "model_data.h"
@@ -23,6 +26,9 @@ static constexpr int kSampleWidth = 2; // int16
 static constexpr size_t kReadChunkBytes = 4096;
 
 static std::atomic<bool> g_stop(false);
+
+static constexpr const char *kColorRed = "\033[31m";
+static constexpr const char *kColorReset = "\033[0m";
 
 struct SourceInfo {
     std::string index;
@@ -36,6 +42,90 @@ static std::string trim(const std::string &s) {
     size_t end = s.find_last_not_of(" \t\n\r");
     if (start == std::string::npos || end == std::string::npos) return "";
     return s.substr(start, end - start + 1);
+}
+
+static void print_error(const std::string &msg) {
+    std::cerr << kColorRed << msg << kColorReset << std::endl;
+}
+
+static std::string now_timestamp() {
+    std::time_t t = std::time(nullptr);
+    std::tm tm{};
+    localtime_r(&t, &tm);
+    char buf[20];
+    std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tm);
+    return std::string(buf);
+}
+
+static std::string now_filename_timestamp() {
+    std::time_t t = std::time(nullptr);
+    std::tm tm{};
+    localtime_r(&t, &tm);
+    char buf[16];
+    std::strftime(buf, sizeof(buf), "%Y%m%d_%H%M%S", &tm);
+    return std::string(buf);
+}
+
+static void ensure_dir(const std::string &path) {
+    struct stat st;
+    if (stat(path.c_str(), &st) == 0) {
+        if (!S_ISDIR(st.st_mode)) {
+            throw std::runtime_error("Path exists but is not a directory: " + path);
+        }
+        return;
+    }
+    if (mkdir(path.c_str(), 0755) != 0) {
+        throw std::runtime_error("Failed to create directory: " + path);
+    }
+}
+
+static std::string strip_blank_audio(const std::string &s) {
+    std::string out = s;
+    const std::string token = "[BLANK_AUDIO]";
+    size_t pos = 0;
+    while ((pos = out.find(token, pos)) != std::string::npos) {
+        out.erase(pos, token.size());
+    }
+    std::string collapsed;
+    collapsed.reserve(out.size());
+    bool last_space = false;
+    for (unsigned char c : out) {
+        if (std::isspace(c)) {
+            if (!last_space) {
+                collapsed.push_back(' ');
+                last_space = true;
+            }
+        } else {
+            collapsed.push_back(static_cast<char>(c));
+            last_space = false;
+        }
+    }
+    return trim(collapsed);
+}
+
+static std::string save_transcript(const std::vector<std::string> &lines,
+                                   const std::string &dir,
+                                   const std::string &title) {
+    ensure_dir(dir);
+    std::string filename = dir + "/" + title + "_" + now_filename_timestamp() + ".txt";
+    std::ofstream ofs(filename, std::ios::out | std::ios::trunc);
+    if (!ofs) {
+        throw std::runtime_error("Failed to open transcript file: " + filename);
+    }
+    for (const auto &line : lines) {
+        ofs << line << "\n";
+    }
+    return filename;
+}
+
+static void whisper_log_callback(ggml_log_level level, const char *text, void *) {
+    if (level == GGML_LOG_LEVEL_ERROR) {
+        std::string msg = text ? text : "";
+        if (!msg.empty() && msg.back() == '\n') {
+            msg.pop_back();
+        }
+        print_error(msg.empty() ? "Whisper error" : msg);
+    }
 }
 
 static bool command_exists(const std::string &cmd) {
@@ -288,13 +378,16 @@ static std::string transcribe_audio(whisper_context *ctx, const std::vector<floa
 
 int main() {
     if (!command_exists("pactl") || !command_exists("parec")) {
-        std::cerr << "Error: pactl/parec not found. Install PulseAudio utilities." << std::endl;
+        print_error("Error: pactl/parec not found. Install PulseAudio utilities.");
         return 1;
     }
 
     install_signal_handler();
+    whisper_log_set(whisper_log_callback, nullptr);
 
-    std::string mode = prompt_choice("Mode", {"streaming", "clip"}, 0);
+    std::string save_title = prompt_string("Save title", "transcript");
+
+    std::string mode = prompt_choice("Mode", {"streaming", "clip"}, 1);
     std::string input_type = prompt_choice(
         "Input source", {"microphone", "system audio (speaker monitor)", "choose source"}, 0);
 
@@ -308,7 +401,7 @@ int main() {
             source = choose_source();
         }
     } catch (const std::exception &e) {
-        std::cerr << "Error: " << e.what() << std::endl;
+        print_error(std::string("Error: ") + e.what());
         return 1;
     }
 
@@ -318,16 +411,24 @@ int main() {
     try {
         model_path = write_model_temp();
     } catch (const std::exception &e) {
-        std::cerr << "Error writing model: " << e.what() << std::endl;
+        print_error(std::string("Error writing model: ") + e.what());
         return 1;
     }
 
     whisper_context *ctx = whisper_init_from_file(model_path.c_str());
     if (!ctx) {
-        std::cerr << "Failed to init whisper context." << std::endl;
+        print_error("Failed to init whisper context.");
         std::remove(model_path.c_str());
         return 1;
     }
+
+    struct Stats {
+        int chunks = 0;
+        double audio_sec = 0.0;
+        double latency = 0.0;
+    } stats;
+
+    std::vector<std::string> transcript_lines;
 
     if (mode == "clip") {
         auto pcm = read_pcm_from_parec(source, 3600.0, true);
@@ -343,14 +444,21 @@ int main() {
         auto end = std::chrono::steady_clock::now();
         double latency = std::chrono::duration<double>(end - start).count();
         double audio_sec = static_cast<double>(pcm.size()) / kSampleRate;
-        double rtf = audio_sec > 0.0 ? latency / audio_sec : 0.0;
-        std::cout << "\n=== Transcription ===\n" << text << "\n";
-        std::cout << "Latency: " << latency << "s | Audio: " << audio_sec << "s | RTF: " << rtf << std::endl;
+        stats.chunks = 1;
+        stats.audio_sec = audio_sec;
+        stats.latency = latency;
+
+        std::string cleaned = strip_blank_audio(text);
+        if (!cleaned.empty()) {
+            std::string line = "[" + now_timestamp() + "] " + cleaned;
+            transcript_lines.push_back(line);
+            std::cout << line << std::endl;
+        }
     } else {
-        double chunk_seconds = prompt_float("Chunk length (seconds)", 4.0, 1.0);
-        double overlap_seconds = prompt_float("Overlap (seconds)", 1.0, 0.0);
+        double chunk_seconds = prompt_float("Chunk length (seconds)", 1.0, 1.0);
+        double overlap_seconds = prompt_float("Overlap (seconds)", 0.25, 0.0);
         if (overlap_seconds >= chunk_seconds) {
-            std::cerr << "Overlap must be smaller than chunk length." << std::endl;
+            print_error("Overlap must be smaller than chunk length.");
             whisper_free(ctx);
             std::remove(model_path.c_str());
             return 1;
@@ -363,7 +471,7 @@ int main() {
                           " --channels=" + std::to_string(kChannels);
         FILE *pipe = popen(cmd.c_str(), "r");
         if (!pipe) {
-            std::cerr << "Failed to start parec." << std::endl;
+            print_error("Failed to start parec.");
             whisper_free(ctx);
             std::remove(model_path.c_str());
             return 1;
@@ -396,17 +504,53 @@ int main() {
                 auto end = std::chrono::steady_clock::now();
                 double latency = std::chrono::duration<double>(end - start).count();
                 double audio_sec = static_cast<double>(chunk.size()) / kSampleRate;
-                double rtf = audio_sec > 0.0 ? latency / audio_sec : 0.0;
+                stats.chunks += 1;
+                stats.audio_sec += audio_sec;
+                stats.latency += latency;
 
-                merged = merge_text(merged, text);
-                std::cout << "\n--- Partial ---\n" << merged << "\n";
-                std::cout << "Latency: " << latency << "s | Audio: " << audio_sec << "s | RTF: " << rtf << std::endl;
+                std::string cleaned = strip_blank_audio(text);
+                if (!cleaned.empty()) {
+                    std::string new_merged = merge_text(merged, cleaned);
+                    std::string delta;
+                    if (new_merged.size() > merged.size()) {
+                        delta = new_merged.substr(merged.size());
+                        if (!delta.empty() && delta.front() == ' ') delta.erase(0, 1);
+                    } else {
+                        delta = cleaned;
+                    }
+                    merged = std::move(new_merged);
+                    std::string line = "[" + now_timestamp() + "] " + trim(delta);
+                    if (!trim(delta).empty()) {
+                        transcript_lines.push_back(line);
+                        std::cout << line << std::endl;
+                    }
+                }
             }
         }
 
         pclose(pipe);
+    }
 
-        std::cout << "\n=== Final Transcription ===\n" << merged << std::endl;
+    std::string saved_path;
+    try {
+        if (!transcript_lines.empty()) {
+            saved_path = save_transcript(transcript_lines, "transcripts", save_title);
+        }
+    } catch (const std::exception &e) {
+        print_error(std::string("Error saving transcript: ") + e.what());
+    }
+
+    std::cout << "\n=== Summary ===" << std::endl;
+    std::cout << "Chunks: " << stats.chunks << std::endl;
+    std::cout << "Audio: " << stats.audio_sec << "s" << std::endl;
+    std::cout << "Latency: " << stats.latency << "s" << std::endl;
+    if (stats.audio_sec > 0.0) {
+        std::cout << "RTF: " << (stats.latency / stats.audio_sec) << std::endl;
+    } else {
+        std::cout << "RTF: 0" << std::endl;
+    }
+    if (!saved_path.empty()) {
+        std::cout << "Saved: " << saved_path << std::endl;
     }
 
     whisper_free(ctx);
