@@ -18,7 +18,7 @@ set(MODEL_HEADER "${CMAKE_BINARY_DIR}/model_data.h")
 
 add_custom_command(
     OUTPUT ${MODEL_HEADER}
-    COMMAND xxd -i -n whisper_model ${MODEL_PATH} > ${MODEL_HEADER}
+    COMMAND xxd -i -n whisper_model ${MODEL_PATH} ${MODEL_HEADER}
     DEPENDS ${MODEL_PATH}
     VERBATIM
 )
