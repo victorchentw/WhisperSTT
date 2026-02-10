@@ -1,0 +1,2 @@
+WhisperiOS/Models/runanywhere/** filter=lfs diff=lfs merge=lfs -text
+WhisperiOS/Models/nexa/** filter=lfs diff=lfs merge=lfs -text

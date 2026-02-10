@@ -1,0 +1,81 @@
+# Pre-commit hooks configuration
+# See https://pre-commit.com for more information
+
+repos:
+  # General hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-merge-conflict
+
+  # Android Lint temporarily disabled due to compilation issues
+  # - repo: local
+  #   hooks:
+  #     - id: android-sdk-lint
+  #       name: Android SDK Lint
+  #       entry: bash -c 'cd sdk/runanywhere-android && if [ -f "./gradlew" ] && [ -n "$ANDROID_HOME" -o -f "../../../local.properties" ]; then ./gradlew lint; else echo "Skipping Android lint (no gradle or SDK)"; exit 0; fi'
+  #       language: system
+  #       files: ^sdk/runanywhere-android/.*\.(kt|kts|java|xml)$
+  #       pass_filenames: false
+
+  # - repo: local
+  #   hooks:
+  #     - id: android-app-lint
+  #       name: Android App Lint
+  #       entry: bash -c 'cd examples/android/RunAnywhereAI && if [ -f "./gradlew" ] && [ -n "$ANDROID_HOME" -o -f "local.properties" ]; then ./gradlew :app:lint; else echo "Skipping Android lint (no gradle or SDK)"; exit 0; fi'
+  #       language: system
+  #       files: ^examples/android/RunAnywhereAI/.*\.(kt|kts|java|xml)$
+  #       pass_filenames: false
+
+  # SwiftLint for iOS SDK (with autofix)
+  - repo: local
+    hooks:
+      - id: ios-sdk-swiftlint-fix
+        name: iOS SDK SwiftLint AutoFix
+        entry: bash -c 'cd sdk/runanywhere-swift && if which swiftlint >/dev/null; then swiftlint --fix --quiet 2>/dev/null || true; else echo "SwiftLint not installed"; fi'
+        language: system
+        files: ^sdk/runanywhere-swift/.*\.swift$
+        pass_filenames: false
+
+      - id: ios-sdk-swiftlint
+        name: iOS SDK SwiftLint
+        entry: bash -c 'cd sdk/runanywhere-swift && if which swiftlint >/dev/null; then swiftlint --strict; else echo "SwiftLint not installed"; exit 0; fi'
+        language: system
+        files: ^sdk/runanywhere-swift/.*\.swift$
+        pass_filenames: false
+
+      - id: ios-sdk-periphery
+        name: iOS SDK Periphery (Unused Code)
+        entry: bash -c 'cd sdk/runanywhere-swift && if which periphery >/dev/null; then OUTPUT=$(periphery scan --targets RunAnywhere --targets ONNXRuntime --targets LlamaCPPRuntime --targets FoundationModelsAdapter --targets FluidAudioDiarization 2>&1); WARNINGS=$(echo "$OUTPUT" | grep "warning:" | grep -v "Associatedtype .* is unused"); if [ -n "$WARNINGS" ]; then echo "$WARNINGS"; echo "Periphery found unused code"; exit 1; fi; exit 0; else echo "Periphery not installed"; exit 0; fi'
+        language: system
+        files: ^sdk/runanywhere-swift/.*\.swift$
+        pass_filenames: false
+
+  # SwiftLint for iOS App
+  - repo: local
+    hooks:
+      - id: ios-app-swiftlint
+        name: iOS App SwiftLint
+        entry: bash -c 'cd examples/ios/RunAnywhereAI && if which swiftlint >/dev/null; then swiftlint --quiet --reporter csv 2>/dev/null || true; else echo "SwiftLint not installed"; exit 0; fi'
+        language: system
+        files: ^examples/ios/RunAnywhereAI/.*\.swift$
+        pass_filenames: false
+
+# Configuration
+default_language_version:
+  python: python3
+
+# Skip these hooks during CI (they run in dedicated CI jobs)
+ci:
+  skip:
+    - android-sdk-lint
+    - android-app-lint
+    - ios-sdk-swiftlint-fix
+    - ios-sdk-swiftlint
+    - ios-sdk-periphery
+    - ios-app-swiftlint

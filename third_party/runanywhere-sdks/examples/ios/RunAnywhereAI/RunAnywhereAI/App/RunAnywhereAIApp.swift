@@ -1,0 +1,322 @@
+//
+//  RunAnywhereAIApp.swift
+//  RunAnywhereAI
+//
+//  Created by Sanchit Monga on 7/21/25.
+//
+
+import SwiftUI
+import RunAnywhere
+import LlamaCPPRuntime
+import ONNXRuntime
+#if canImport(UIKit)
+import UIKit
+#endif
+import os
+#if os(macOS)
+import AppKit
+#endif
+
+@main
+struct RunAnywhereAIApp: App {
+    private let logger = Logger(subsystem: "com.runanywhere.RunAnywhereAI", category: "RunAnywhereAIApp")
+    @StateObject private var modelManager = ModelManager.shared
+    @State private var isSDKInitialized = false
+    @State private var initializationError: Error?
+
+    var body: some Scene {
+        WindowGroup {
+            Group {
+                if isSDKInitialized {
+                    ContentView()
+                        .environmentObject(modelManager)
+                        .onAppear {
+                            logger.info("🎉 App is ready to use!")
+                        }
+                } else if let error = initializationError {
+                    InitializationErrorView(error: error) {
+                        // Retry initialization
+                        Task {
+                            await retryInitialization()
+                        }
+                    }
+                } else {
+                    InitializationLoadingView()
+                }
+            }
+            .task {
+                logger.info("🏁 App launched, initializing SDK...")
+                await initializeSDK()
+            }
+        }
+        #if os(macOS)
+        .windowStyle(.titleBar)
+        .windowToolbarStyle(.unified)
+        .defaultSize(width: 1200, height: 800)
+        .windowResizability(.contentSize)
+        #endif
+    }
+
+    private func initializeSDK() async {
+        do {
+            // Clear any previous error
+            await MainActor.run { initializationError = nil }
+
+            logger.info("🎯 Initializing SDK...")
+
+            let startTime = Date()
+
+            // Check for custom API configuration (stored in Settings)
+            let customApiKey = SettingsViewModel.getStoredApiKey()
+            let customBaseURL = SettingsViewModel.getStoredBaseURL()
+
+            if let apiKey = customApiKey, let baseURL = customBaseURL {
+                // Custom configuration mode - use stored credentials
+                // Always use .production for custom backends (model assignment auto-fetch enabled)
+                logger.info("🔧 Found custom API configuration")
+                logger.info("   Base URL: \(baseURL, privacy: .public)")
+
+                try RunAnywhere.initialize(
+                    apiKey: apiKey,
+                    baseURL: baseURL,
+                    environment: .production
+                )
+                logger.info("✅ SDK initialized with CUSTOM configuration (production)")
+            } else {
+                // Default mode based on build configuration
+                #if DEBUG
+                // Development mode - uses Supabase, no API key needed
+                try RunAnywhere.initialize()
+                logger.info("✅ SDK initialized in DEVELOPMENT mode")
+                #else
+                // Production mode - requires API key and backend URL
+                // Configure these via Settings screen or set environment variables
+                let apiKey = "YOUR_API_KEY_HERE"
+                let baseURL = "YOUR_BASE_URL_HERE"
+
+                try RunAnywhere.initialize(
+                    apiKey: apiKey,
+                    baseURL: baseURL,
+                    environment: .production
+                )
+                logger.info("✅ SDK initialized in PRODUCTION mode")
+                #endif
+            }
+
+            // Register modules and models
+            await registerModulesAndModels()
+
+            let initTime = Date().timeIntervalSince(startTime)
+            logger.info("✅ SDK successfully initialized!")
+            logger.info("⚡ Initialization time: \(String(format: "%.3f", initTime * 1000), privacy: .public)ms")
+            logger.info("🎯 SDK Status: \(RunAnywhere.isActive ? "Active" : "Inactive")")
+            logger.info("🔧 Environment: \(RunAnywhere.environment?.description ?? "Unknown")")
+            logger.info("📱 Services will initialize on first API call")
+
+            // Mark as initialized
+            await MainActor.run {
+                isSDKInitialized = true
+            }
+
+            logger.info("💡 Models registered, user can now download and select models")
+        } catch {
+            logger.error("❌ SDK initialization failed: \(error, privacy: .public)")
+            await MainActor.run {
+                initializationError = error
+            }
+        }
+    }
+
+    private func retryInitialization() async {
+        await MainActor.run {
+            initializationError = nil
+        }
+        await initializeSDK()
+    }
+
+    /// Register modules with their associated models
+    /// Each module explicitly owns its models - the framework is determined by the module
+    @MainActor
+    private func registerModulesAndModels() async { // swiftlint:disable:this function_body_length
+        logger.info("📦 Registering modules with their models...")
+
+        // Register LlamaCPP backend with C++ commons
+        LlamaCPP.register(priority: 100)
+        logger.info("✅ LlamaCPP backend registered")
+
+        // Register ONNX backend service providers
+        ONNX.register(priority: 100)
+        logger.info("✅ ONNX backend registered")
+
+        // Register LLM models using the new RunAnywhere.registerModel API
+        // Using explicit IDs ensures models are recognized after download across app restarts
+        if let smolLM2URL = URL(string: "https://huggingface.co/prithivMLmods/SmolLM2-360M-GGUF/resolve/main/SmolLM2-360M.Q8_0.gguf") {
+            RunAnywhere.registerModel(
+                id: "smollm2-360m-q8_0",
+                name: "SmolLM2 360M Q8_0",
+                url: smolLM2URL,
+                framework: .llamaCpp,
+                memoryRequirement: 500_000_000
+            )
+        }
+        if let llama2URL = URL(string: "https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF/resolve/main/llama-2-7b-chat.Q4_K_M.gguf") {
+            RunAnywhere.registerModel(
+                id: "llama-2-7b-chat-q4_k_m",
+                name: "Llama 2 7B Chat Q4_K_M",
+                url: llama2URL,
+                framework: .llamaCpp,
+                memoryRequirement: 4_000_000_000
+            )
+        }
+        if let mistralURL = URL(string: "https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.1-GGUF/resolve/main/mistral-7b-instruct-v0.1.Q4_K_M.gguf") {
+            RunAnywhere.registerModel(
+                id: "mistral-7b-instruct-q4_k_m",
+                name: "Mistral 7B Instruct Q4_K_M",
+                url: mistralURL,
+                framework: .llamaCpp,
+                memoryRequirement: 4_000_000_000
+            )
+        }
+        if let qwenURL = URL(string: "https://huggingface.co/Triangle104/Qwen2.5-0.5B-Instruct-Q6_K-GGUF/resolve/main/qwen2.5-0.5b-instruct-q6_k.gguf") {
+            RunAnywhere.registerModel(
+                id: "qwen2.5-0.5b-instruct-q6_k",
+                name: "Qwen 2.5 0.5B Instruct Q6_K",
+                url: qwenURL,
+                framework: .llamaCpp,
+                memoryRequirement: 600_000_000
+            )
+        }
+        if let lfm2Q4URL = URL(string: "https://huggingface.co/LiquidAI/LFM2-350M-GGUF/resolve/main/LFM2-350M-Q4_K_M.gguf") {
+            RunAnywhere.registerModel(
+                id: "lfm2-350m-q4_k_m",
+                name: "LiquidAI LFM2 350M Q4_K_M",
+                url: lfm2Q4URL,
+                framework: .llamaCpp,
+                memoryRequirement: 250_000_000
+            )
+        }
+        if let lfm2Q8URL = URL(string: "https://huggingface.co/LiquidAI/LFM2-350M-GGUF/resolve/main/LFM2-350M-Q8_0.gguf") {
+            RunAnywhere.registerModel(
+                id: "lfm2-350m-q8_0",
+                name: "LiquidAI LFM2 350M Q8_0",
+                url: lfm2Q8URL,
+                framework: .llamaCpp,
+                memoryRequirement: 400_000_000
+            )
+        }
+        logger.info("✅ LLM models registered")
+
+        // Register ONNX STT and TTS models
+        // Using tar.gz format hosted on RunanywhereAI/sherpa-onnx for fast native extraction
+        if let whisperURL = URL(string: "https://github.com/RunanywhereAI/sherpa-onnx/releases/download/runanywhere-models-v1/sherpa-onnx-whisper-tiny.en.tar.gz") {
+            RunAnywhere.registerModel(
+                id: "sherpa-onnx-whisper-tiny.en",
+                name: "Sherpa Whisper Tiny (ONNX)",
+                url: whisperURL,
+                framework: .onnx,
+                modality: .speechRecognition,
+                artifactType: .archive(.tarGz, structure: .nestedDirectory),
+                memoryRequirement: 75_000_000
+            )
+        }
+        if let piperUSURL = URL(string: "https://github.com/RunanywhereAI/sherpa-onnx/releases/download/runanywhere-models-v1/vits-piper-en_US-lessac-medium.tar.gz") {
+            RunAnywhere.registerModel(
+                id: "vits-piper-en_US-lessac-medium",
+                name: "Piper TTS (US English - Medium)",
+                url: piperUSURL,
+                framework: .onnx,
+                modality: .speechSynthesis,
+                artifactType: .archive(.tarGz, structure: .nestedDirectory),
+                memoryRequirement: 65_000_000
+            )
+        }
+        if let piperGBURL = URL(string: "https://github.com/RunanywhereAI/sherpa-onnx/releases/download/runanywhere-models-v1/vits-piper-en_GB-alba-medium.tar.gz") {
+            RunAnywhere.registerModel(
+                id: "vits-piper-en_GB-alba-medium",
+                name: "Piper TTS (British English)",
+                url: piperGBURL,
+                framework: .onnx,
+                modality: .speechSynthesis,
+                artifactType: .archive(.tarGz, structure: .nestedDirectory),
+                memoryRequirement: 65_000_000
+            )
+        }
+        logger.info("✅ ONNX STT/TTS models registered")
+        logger.info("🎉 All modules and models registered")
+    }
+}
+
+// MARK: - Loading Views
+
+struct InitializationLoadingView: View {
+    @State private var isAnimating = false
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Image(systemName: "brain")
+                .font(.system(size: 60))
+                .foregroundColor(AppColors.primaryAccent)
+                .scaleEffect(isAnimating ? 1.2 : 1.0)
+                .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isAnimating)
+
+            Text("Setting Up Your AI")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            Text("Preparing your private AI assistant...")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+
+            ProgressView()
+                .progressViewStyle(CircularProgressViewStyle())
+                .scaleEffect(1.2)
+        }
+        .padding(40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        #if os(iOS)
+        .background(Color(.systemBackground))
+        #else
+        .background(Color(NSColor.windowBackgroundColor))
+        #endif
+        .onAppear {
+            isAnimating = true
+        }
+    }
+}
+
+struct InitializationErrorView: View {
+    let error: Error
+    let retryAction: () -> Void
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 60))
+                .foregroundColor(.orange)
+
+            Text("Initialization Failed")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            Text(error.localizedDescription)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+
+            Button("Retry") {
+                retryAction()
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(AppColors.primaryAccent)
+            .font(.headline)
+        }
+        .padding(40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        #if os(iOS)
+        .background(Color(.systemBackground))
+        #else
+        .background(Color(NSColor.windowBackgroundColor))
+        #endif
+    }
+}

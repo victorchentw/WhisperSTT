@@ -8,8 +8,15 @@
 
 /* Begin PBXBuildFile section */
 		0361E0D8183CBC6B3EA892AC /* Models/tokenizers/openai-whisper-tiny in Resources */ = {isa = PBXBuildFile; fileRef = F052BA8D70DE2E22291AEF34 /* Models/tokenizers/openai-whisper-tiny */; };
+		3833C54F697BE3881B83B336 /* RunAnywhere in Frameworks */ = {isa = PBXBuildFile; productRef = BF874124F3EFA01789B7A05C /* RunAnywhere */; };
+		AEAB8B4CFC7D161A5B8B5315 /* RunAnywhereONNX in Frameworks */ = {isa = PBXBuildFile; productRef = 5E2221C97D7F3B003027126D /* RunAnywhereONNX */; };
+		B8C3B27EA67B7744A024E48E /* NexaSdk in Frameworks */ = {isa = PBXBuildFile; productRef = 9F322C1C5A637B2155967C34 /* NexaSdk */; };
 		4D5A8BF33980D5A79544D8F0 /* WhisperKit in Frameworks */ = {isa = PBXBuildFile; productRef = 935F2DB0C2CE248047F14182 /* WhisperKit */; };
 		7FDB2696241D05608A903B02 /* Models/whisperkit-coreml/openai_whisper-tiny in Resources */ = {isa = PBXBuildFile; fileRef = 74F6956F8EAACF307FB349CC /* Models/whisperkit-coreml/openai_whisper-tiny */; };
+		B581FEAAC5A675D14117D0DD /* Benchmarking.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCD26817EAAB201854AD5ADC /* Benchmarking.swift */; };
+		73FA9C68AAB8A70911A70F6F /* RunAnywhereEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E3F9C27BCD478A66EF0D916 /* RunAnywhereEngine.swift */; };
+		A66900DA5563B6BDD8DAECA2 /* ModelCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99BBDBCFBEAF3A3934ED14C5 /* ModelCatalog.swift */; };
+		A61C4DF9DF50CA4254C6402F /* Models/nexa in Resources */ = {isa = PBXBuildFile; fileRef = E949E7968A08AAF2E4C47AF9 /* Models/nexa */; };
 		A1B2C3D4E5F60718293A4B80 /* WhisperiOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B70 /* WhisperiOSApp.swift */; };
 		A1B2C3D4E5F60718293A4B81 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B71 /* ContentView.swift */; };
 		A1B2C3D4E5F60718293A4B82 /* AudioRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B72 /* AudioRecorder.swift */; };
@@ -19,10 +26,14 @@
 		A1B2C3D4E5F60718293A4B86 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B76 /* Assets.xcassets */; };
 		A1B2C3D4E5F60718293A4B87 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B77 /* LaunchScreen.storyboard */; };
 		CFBB9D4F6D1CCC995D809639 /* StreamingTranscriber.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4D59ED01573AC49D1BCD67E /* StreamingTranscriber.swift */; };
+		7D8EAC58881E456A167C1561 /* Models/runanywhere in Resources */ = {isa = PBXBuildFile; fileRef = D92B8CE0D6F4DD2C04DBEFD0 /* Models/runanywhere */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		74F6956F8EAACF307FB349CC /* Models/whisperkit-coreml/openai_whisper-tiny */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "whisperkit-coreml/openai_whisper-tiny"; sourceTree = "<group>"; };
+		8E3F9C27BCD478A66EF0D916 /* RunAnywhereEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunAnywhereEngine.swift; sourceTree = "<group>"; };
+		99BBDBCFBEAF3A3934ED14C5 /* ModelCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelCatalog.swift; sourceTree = "<group>"; };
+		CCD26817EAAB201854AD5ADC /* Benchmarking.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Benchmarking.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4B69 /* WhisperiOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WhisperiOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1B2C3D4E5F60718293A4B70 /* WhisperiOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperiOSApp.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4B71 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -34,6 +45,8 @@
 		A1B2C3D4E5F60718293A4B77 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4B78 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		D4D59ED01573AC49D1BCD67E /* StreamingTranscriber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingTranscriber.swift; sourceTree = "<group>"; };
+		D92B8CE0D6F4DD2C04DBEFD0 /* Models/runanywhere */ = {isa = PBXFileReference; lastKnownFileType = folder; path = runanywhere; sourceTree = "<group>"; };
+		E949E7968A08AAF2E4C47AF9 /* Models/nexa */ = {isa = PBXFileReference; lastKnownFileType = folder; path = nexa; sourceTree = "<group>"; };
 		F052BA8D70DE2E22291AEF34 /* Models/tokenizers/openai-whisper-tiny */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "tokenizers/openai-whisper-tiny"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -42,6 +55,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				3833C54F697BE3881B83B336 /* RunAnywhere in Frameworks */,
+				AEAB8B4CFC7D161A5B8B5315 /* RunAnywhereONNX in Frameworks */,
+				B8C3B27EA67B7744A024E48E /* NexaSdk in Frameworks */,
 				4D5A8BF33980D5A79544D8F0 /* WhisperKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -74,6 +90,9 @@
 				D4D59ED01573AC49D1BCD67E /* StreamingTranscriber.swift */,
 				A1B2C3D4E5F60718293A4B73 /* TTSService.swift */,
 				A1B2C3D4E5F60718293A4B74 /* WhisperEngine.swift */,
+				8E3F9C27BCD478A66EF0D916 /* RunAnywhereEngine.swift */,
+				99BBDBCFBEAF3A3934ED14C5 /* ModelCatalog.swift */,
+				CCD26817EAAB201854AD5ADC /* Benchmarking.swift */,
 				A1B2C3D4E5F60718293A4B75 /* PerformanceMetrics.swift */,
 				A5EBFD723D73938AB7B9256B /* Models */,
 				A1B2C3D4E5F60718293A4B7A /* Resources */,
@@ -96,6 +115,8 @@
 			children = (
 				74F6956F8EAACF307FB349CC /* Models/whisperkit-coreml/openai_whisper-tiny */,
 				F052BA8D70DE2E22291AEF34 /* Models/tokenizers/openai-whisper-tiny */,
+				E949E7968A08AAF2E4C47AF9 /* Models/nexa */,
+				D92B8CE0D6F4DD2C04DBEFD0 /* Models/runanywhere */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -118,6 +139,9 @@
 			name = WhisperiOS;
 			packageProductDependencies = (
 				935F2DB0C2CE248047F14182 /* WhisperKit */,
+				BF874124F3EFA01789B7A05C /* RunAnywhere */,
+				5E2221C97D7F3B003027126D /* RunAnywhereONNX */,
+				9F322C1C5A637B2155967C34 /* NexaSdk */,
 			);
 			productName = WhisperiOS;
 			productReference = A1B2C3D4E5F60718293A4B69 /* WhisperiOS.app */;
@@ -149,6 +173,8 @@
 			mainGroup = A1B2C3D4E5F60718293A4B5D;
 			packageReferences = (
 				2C2DFF97A770104C9602FA8A /* XCRemoteSwiftPackageReference "WhisperKit" */,
+				62BF2B2A8E22C632592E894F /* XCLocalSwiftPackageReference "runanywhere-sdks" */,
+				9A1C4A58D1733612457515E3 /* XCLocalSwiftPackageReference "nexa-sdk-ios" */,
 			);
 			productRefGroup = A1B2C3D4E5F60718293A4B5E /* Products */;
 			projectDirPath = "";
@@ -166,6 +192,8 @@
 			files = (
 				7FDB2696241D05608A903B02 /* Models/whisperkit-coreml/openai_whisper-tiny in Resources */,
 				0361E0D8183CBC6B3EA892AC /* Models/tokenizers/openai-whisper-tiny in Resources */,
+				A61C4DF9DF50CA4254C6402F /* Models/nexa in Resources */,
+				7D8EAC58881E456A167C1561 /* Models/runanywhere in Resources */,
 				A1B2C3D4E5F60718293A4B86 /* Assets.xcassets in Resources */,
 				A1B2C3D4E5F60718293A4B87 /* LaunchScreen.storyboard in Resources */,
 			);
@@ -184,6 +212,9 @@
 				CFBB9D4F6D1CCC995D809639 /* StreamingTranscriber.swift in Sources */,
 				A1B2C3D4E5F60718293A4B83 /* TTSService.swift in Sources */,
 				A1B2C3D4E5F60718293A4B84 /* WhisperEngine.swift in Sources */,
+				73FA9C68AAB8A70911A70F6F /* RunAnywhereEngine.swift in Sources */,
+				A66900DA5563B6BDD8DAECA2 /* ModelCatalog.swift in Sources */,
+				B581FEAAC5A675D14117D0DD /* Benchmarking.swift in Sources */,
 				A1B2C3D4E5F60718293A4B85 /* PerformanceMetrics.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -215,39 +246,51 @@
 			};
 			name = Release;
 		};
-		A1B2C3D4E5F60718293A4B64 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = R2H967U7J8;
-				INFOPLIST_FILE = WhisperiOS/Resources/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.example.WhisperiOS;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SUPPORTS_MACCATALYST = NO;
+			A1B2C3D4E5F60718293A4B64 /* Debug */ = {
+				isa = XCBuildConfiguration;
+				buildSettings = {
+					ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+					CODE_SIGN_STYLE = Automatic;
+					CURRENT_PROJECT_VERSION = 1;
+					DEVELOPMENT_TEAM = R2H967U7J8;
+					"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+					FRAMEWORK_SEARCH_PATHS = (
+						"$(inherited)",
+						"$(PROJECT_DIR)/third_party/nexa-sdk-ios/NexaSdk.xcframework/ios-arm64",
+					);
+					INFOPLIST_FILE = WhisperiOS/Resources/Info.plist;
+					IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+					LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
+					MARKETING_VERSION = 1.0;
+					PRODUCT_BUNDLE_IDENTIFIER = com.example.WhisperiOS;
+					PRODUCT_NAME = "$(TARGET_NAME)";
+					SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+					SUPPORTS_MACCATALYST = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
 		};
-		A1B2C3D4E5F60718293A4B65 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = R2H967U7J8;
-				INFOPLIST_FILE = WhisperiOS/Resources/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.example.WhisperiOS;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SUPPORTS_MACCATALYST = NO;
+			A1B2C3D4E5F60718293A4B65 /* Release */ = {
+				isa = XCBuildConfiguration;
+				buildSettings = {
+					ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+					CODE_SIGN_STYLE = Automatic;
+					CURRENT_PROJECT_VERSION = 1;
+					DEVELOPMENT_TEAM = R2H967U7J8;
+					"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+					FRAMEWORK_SEARCH_PATHS = (
+						"$(inherited)",
+						"$(PROJECT_DIR)/third_party/nexa-sdk-ios/NexaSdk.xcframework/ios-arm64",
+					);
+					INFOPLIST_FILE = WhisperiOS/Resources/Info.plist;
+					IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+					LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
+					MARKETING_VERSION = 1.0;
+					PRODUCT_BUNDLE_IDENTIFIER = com.example.WhisperiOS;
+					PRODUCT_NAME = "$(TARGET_NAME)";
+					SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+					SUPPORTS_MACCATALYST = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
 			};
@@ -285,6 +328,14 @@
 				minimumVersion = 0.9.4;
 			};
 		};
+		62BF2B2A8E22C632592E894F /* XCLocalSwiftPackageReference "runanywhere-sdks" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = third_party/runanywhere-sdks;
+		};
+		9A1C4A58D1733612457515E3 /* XCLocalSwiftPackageReference "nexa-sdk-ios" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "third_party/nexa-sdk-ios";
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -292,6 +343,21 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 2C2DFF97A770104C9602FA8A /* XCRemoteSwiftPackageReference "WhisperKit" */;
 			productName = WhisperKit;
+		};
+		BF874124F3EFA01789B7A05C /* RunAnywhere */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 62BF2B2A8E22C632592E894F /* XCLocalSwiftPackageReference "runanywhere-sdks" */;
+			productName = RunAnywhere;
+		};
+		5E2221C97D7F3B003027126D /* RunAnywhereONNX */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 62BF2B2A8E22C632592E894F /* XCLocalSwiftPackageReference "runanywhere-sdks" */;
+			productName = RunAnywhereONNX;
+		};
+		9F322C1C5A637B2155967C34 /* NexaSdk */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 9A1C4A58D1733612457515E3 /* XCLocalSwiftPackageReference "nexa-sdk-ios" */;
+			productName = NexaSdk;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
