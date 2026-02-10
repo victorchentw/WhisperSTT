@@ -1,3 +1,6 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:28e543ca46e7d6490a6c7c79b62a6295dd6b59353325f4b8628bbd819fa052b6
-size 114
+{
+    "ModelName": "parakeet",
+    "ModelType": "asr",
+    "PluginId": "ane",
+    "MinSDKVersion": "v0.2.30-rc2"
+}

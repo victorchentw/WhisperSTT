@@ -1,3 +1,11 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:93b95e6b7509ee58780d59fb1e254ed68ae92d28fccf2399931e1c56e78da47c
-size 371
+RunAnywhere bundled models (ONNX)
+
+This app expects RunAnywhere ONNX STT model folders under:
+  WhisperiOS/Models/runanywhere/<model-id>/
+
+Model IDs configured in the app:
+  - whisper-tiny-onnx
+  - whisper-base-onnx
+
+Place the extracted ONNX model files inside the folder with the matching model ID.
+The app copies bundled models into RunAnywhere's storage on first use.
