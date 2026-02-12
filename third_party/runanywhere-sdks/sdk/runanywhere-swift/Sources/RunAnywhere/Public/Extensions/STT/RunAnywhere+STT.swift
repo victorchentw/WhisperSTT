@@ -77,21 +77,18 @@ public extension RunAnywhere {
         let audioSizeBytes = audioData.count
         let audioLengthSec = estimateAudioLength(dataSize: audioSizeBytes)
 
-        // Build C options
-        var cOptions = rac_stt_options_t()
-        cOptions.language = (options.language as NSString).utf8String
-        cOptions.sample_rate = Int32(options.sampleRate)
-
-        // Transcribe (C++ emits events)
+        // Build C options from full STTOptions mapping
         var sttResult = rac_stt_result_t()
-        let transcribeResult = audioData.withUnsafeBytes { audioPtr in
-            rac_stt_component_transcribe(
-                handle,
-                audioPtr.baseAddress,
-                audioData.count,
-                &cOptions,
-                &sttResult
-            )
+        let transcribeResult = options.withCOptions { cOptions in
+            audioData.withUnsafeBytes { audioPtr in
+                rac_stt_component_transcribe(
+                    handle,
+                    audioPtr.baseAddress,
+                    audioData.count,
+                    cOptions,
+                    &sttResult
+                )
+            }
         }
 
         guard transcribeResult == RAC_SUCCESS else {
@@ -213,39 +210,36 @@ public extension RunAnywhere {
         let context = STTStreamingContext(onPartialResult: onPartialResult)
         let contextPtr = Unmanaged.passRetained(context).toOpaque()
 
-        // Build C options
-        var cOptions = rac_stt_options_t()
-        cOptions.language = (options.language as NSString).utf8String
-        cOptions.sample_rate = Int32(options.sampleRate)
-
         // Stream transcription with callback
-        let result = audioData.withUnsafeBytes { audioPtr in
-            rac_stt_component_transcribe_stream(
-                handle,
-                audioPtr.baseAddress,
-                audioData.count,
-                &cOptions,
-                { partialText, isFinal, userData in
-                    guard let userData = userData else { return }
-                    let ctx = Unmanaged<STTStreamingContext>.fromOpaque(userData).takeUnretainedValue()
+        let result = options.withCOptions { cOptions in
+            audioData.withUnsafeBytes { audioPtr in
+                rac_stt_component_transcribe_stream(
+                    handle,
+                    audioPtr.baseAddress,
+                    audioData.count,
+                    cOptions,
+                    { partialText, isFinal, userData in
+                        guard let userData = userData else { return }
+                        let ctx = Unmanaged<STTStreamingContext>.fromOpaque(userData).takeUnretainedValue()
 
-                    let text = partialText.map { String(cString: $0) } ?? ""
-                    let partialResult = STTTranscriptionResult(
-                        transcript: text,
-                        confidence: nil,
-                        timestamps: nil,
-                        language: nil,
-                        alternatives: nil
-                    )
+                        let text = partialText.map { String(cString: $0) } ?? ""
+                        let partialResult = STTTranscriptionResult(
+                            transcript: text,
+                            confidence: nil,
+                            timestamps: nil,
+                            language: nil,
+                            alternatives: nil
+                        )
 
-                    ctx.onPartialResult(partialResult)
+                        ctx.onPartialResult(partialResult)
 
-                    if isFinal == RAC_TRUE {
-                        ctx.finalText = text
-                    }
-                },
-                contextPtr
-            )
+                        if isFinal == RAC_TRUE {
+                            ctx.finalText = text
+                        }
+                    },
+                    contextPtr
+                )
+            }
         }
 
         // Release context

@@ -27,6 +27,10 @@ final class RunAnywhereEngine {
     private var isInitialized = false
     private var loadedModelId: String?
     private let sampleRate: Double = 16_000
+    // RunAnywhere ONNX backend currently processes only < 30s per request.
+    private let maxClipSecondsPerRequest: Double = 29.0
+    // Bump this when bundled RunAnywhere model layout/selection logic changes.
+    private let bundledModelSyncVersion = "runanywhere-ios-v4"
 
     func transcribe(
         audioURL: URL,
@@ -42,11 +46,29 @@ final class RunAnywhereEngine {
         try await loadModelIfNeeded(modelId)
 
         let (audioData, duration) = try Self.loadAudioData(from: audioURL, sampleRate: sampleRate)
+        let normalizedLanguage = Self.normalizedLanguageCode(
+            language,
+            detectLanguage: detectLanguage
+        )
         let options = STTOptions(
-            language: language,
+            language: normalizedLanguage,
             detectLanguage: detectLanguage,
             sampleRate: Int(sampleRate)
         )
+
+        let samplesPerRequest = max(1, Int(sampleRate * maxClipSecondsPerRequest))
+        let bytesPerSample = MemoryLayout<Int16>.size
+        let totalSamples = audioData.count / bytesPerSample
+
+        if totalSamples > samplesPerRequest {
+            return try await transcribeChunked(
+                audioData: audioData,
+                duration: duration,
+                options: options,
+                samplesPerRequest: samplesPerRequest
+            )
+        }
+
 
         let output = try await RunAnywhere.transcribeWithOptions(audioData, options: options)
         return WhisperTranscriptionResult(
@@ -54,6 +76,60 @@ final class RunAnywhereEngine {
             processingTime: output.metadata.processingTime,
             audioDuration: duration,
             realTimeFactor: output.metadata.realTimeFactor
+        )
+    }
+
+    private func transcribeChunked(
+        audioData: Data,
+        duration: TimeInterval,
+        options: STTOptions,
+        samplesPerRequest: Int
+    ) async throws -> WhisperTranscriptionResult {
+        let bytesPerSample = MemoryLayout<Int16>.size
+        let totalSamples = audioData.count / bytesPerSample
+        let chunkCount = Int(ceil(Double(totalSamples) / Double(samplesPerRequest)))
+        print(
+            "[RunAnywhereEngine] Long clip (\(String(format: "%.2f", duration))s) split into \(chunkCount) chunks of <= \(String(format: "%.1f", maxClipSecondsPerRequest))s"
+        )
+
+        var allTexts: [String] = []
+        allTexts.reserveCapacity(chunkCount)
+        var totalProcessingTime: TimeInterval = 0
+
+        var startSample = 0
+        var chunkIndex = 1
+        while startSample < totalSamples {
+            let endSample = min(totalSamples, startSample + samplesPerRequest)
+            let byteRange = (startSample * bytesPerSample)..<(endSample * bytesPerSample)
+            let chunkData = audioData.subdata(in: byteRange)
+
+            let output = try await RunAnywhere.transcribeWithOptions(chunkData, options: options)
+            totalProcessingTime += output.metadata.processingTime
+
+            let cleanedText = output.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cleanedText.isEmpty {
+                allTexts.append(cleanedText)
+            }
+
+            print(
+                "[RunAnywhereEngine] Chunk \(chunkIndex)/\(chunkCount): samples=\(endSample - startSample), text=\(cleanedText.count) chars"
+            )
+
+            startSample = endSample
+            chunkIndex += 1
+        }
+
+        let mergedText = allTexts
+            .joined(separator: " ")
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let realTimeFactor = duration > 0 ? (totalProcessingTime / duration) : nil
+
+        return WhisperTranscriptionResult(
+            text: mergedText,
+            processingTime: totalProcessingTime,
+            audioDuration: duration,
+            realTimeFactor: realTimeFactor
         )
     }
 
@@ -72,8 +148,12 @@ final class RunAnywhereEngine {
         try await ensureInitialized()
         try await loadModelIfNeeded(modelId)
 
+        let normalizedLanguage = Self.normalizedLanguageCode(
+            language,
+            detectLanguage: detectLanguage
+        )
         let options = STTOptions(
-            language: language,
+            language: normalizedLanguage,
             detectLanguage: detectLanguage,
             sampleRate: Int(sampleRate)
         )
@@ -119,13 +199,17 @@ final class RunAnywhereEngine {
                 framework: .onnx
             )
 
-            if !FileManager.default.fileExists(atPath: modelFolder.path) || isDirectoryEmpty(modelFolder) {
+            if shouldSyncBundledModel(at: modelFolder) {
                 do {
                     try copyBundledModel(from: bundleURL, to: modelFolder)
+                    try writeBundleSyncMarker(at: modelFolder)
                 } catch {
                     throw RunAnywhereEngineError.modelCopyFailed(error.localizedDescription)
                 }
             }
+
+            // Normalize file names so the backend deterministically loads full-precision files.
+            try normalizeWhisperOnnxLayoutIfNeeded(in: modelFolder)
 
             let modelInfo = ModelInfo(
                 id: model.id,
@@ -147,6 +231,23 @@ final class RunAnywhereEngine {
         }
     }
 
+    private func shouldSyncBundledModel(at modelFolder: URL) -> Bool {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: modelFolder.path) else { return true }
+        if isDirectoryEmpty(modelFolder) { return true }
+
+        let markerURL = modelFolder.appendingPathComponent(".bundle-sync-version")
+        let marker = (try? String(contentsOf: markerURL, encoding: .utf8))?.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        return marker != bundledModelSyncVersion
+    }
+
+    private func writeBundleSyncMarker(at modelFolder: URL) throws {
+        let markerURL = modelFolder.appendingPathComponent(".bundle-sync-version")
+        try bundledModelSyncVersion.write(to: markerURL, atomically: true, encoding: .utf8)
+    }
+
     private func copyBundledModel(from source: URL, to destination: URL) throws {
         let fm = FileManager.default
         if fm.fileExists(atPath: destination.path) {
@@ -159,6 +260,155 @@ final class RunAnywhereEngine {
     private func isDirectoryEmpty(_ url: URL) -> Bool {
         let contents = (try? FileManager.default.contentsOfDirectory(atPath: url.path)) ?? []
         return contents.isEmpty
+    }
+
+    private func normalizeWhisperOnnxLayoutIfNeeded(in modelFolder: URL) throws {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: modelFolder.path) else { return }
+
+        let entries = try fm.contentsOfDirectory(
+            at: modelFolder,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )
+        guard !entries.isEmpty else { return }
+
+        let encoderCandidates = entries
+            .filter { $0.pathExtension.lowercased() == "onnx" }
+            .filter { $0.lastPathComponent.lowercased().contains("encoder") }
+        let decoderCandidates = entries
+            .filter { $0.pathExtension.lowercased() == "onnx" }
+            .filter { $0.lastPathComponent.lowercased().contains("decoder") }
+        let tokenCandidates = entries
+            .filter { $0.pathExtension.lowercased() == "txt" }
+            .filter { $0.lastPathComponent.lowercased().contains("tokens") }
+
+        let chosenEncoder = choosePreferredFile(
+            from: encoderCandidates,
+            exactName: "encoder.onnx"
+        )
+        let chosenDecoder = choosePreferredFile(
+            from: decoderCandidates,
+            exactName: "decoder.onnx"
+        )
+        let chosenTokens = choosePreferredFile(
+            from: tokenCandidates,
+            exactName: "tokens.txt"
+        )
+
+        try moveToCanonicalNameIfNeeded(
+            chosenEncoder,
+            canonicalName: "encoder.onnx",
+            in: modelFolder
+        )
+        try moveToCanonicalNameIfNeeded(
+            chosenDecoder,
+            canonicalName: "decoder.onnx",
+            in: modelFolder
+        )
+        try moveToCanonicalNameIfNeeded(
+            chosenTokens,
+            canonicalName: "tokens.txt",
+            in: modelFolder
+        )
+
+        // Keep only canonical whisper files so backend directory scans cannot pick stale/int8 variants.
+        try removeNonCanonicalWhisperFiles(in: modelFolder)
+    }
+
+    private func choosePreferredFile(from candidates: [URL], exactName: String) -> URL? {
+        guard !candidates.isEmpty else { return nil }
+
+        struct CandidateScore {
+            let url: URL
+            let isLikelyInt8: Bool
+            let fileSize: Int64
+            let isExactName: Bool
+        }
+
+        let scored = candidates.map { url in
+            CandidateScore(
+                url: url,
+                isLikelyInt8: isLikelyInt8File(url.lastPathComponent),
+                fileSize: fileSize(for: url),
+                isExactName: url.lastPathComponent.lowercased() == exactName.lowercased()
+            )
+        }
+
+        let sorted = scored.sorted { lhs, rhs in
+            // 1) Prefer file names that are not obviously quantized.
+            if lhs.isLikelyInt8 != rhs.isLikelyInt8 {
+                return !lhs.isLikelyInt8 && rhs.isLikelyInt8
+            }
+            // 2) Prefer larger file size to avoid stale "renamed int8" canonical files.
+            if lhs.fileSize != rhs.fileSize {
+                return lhs.fileSize > rhs.fileSize
+            }
+            // 3) Prefer canonical exact name when precision/size are equivalent.
+            if lhs.isExactName != rhs.isExactName {
+                return lhs.isExactName && !rhs.isExactName
+            }
+            return lhs.url.lastPathComponent < rhs.url.lastPathComponent
+        }
+
+        return sorted.first?.url
+    }
+
+    private func isLikelyInt8File(_ fileName: String) -> Bool {
+        let lowered = fileName.lowercased()
+        return lowered.contains(".int8.") || lowered.contains("int8") || lowered.contains("quant")
+    }
+
+    private func fileSize(for url: URL) -> Int64 {
+        let values = try? url.resourceValues(forKeys: [.fileSizeKey])
+        return Int64(values?.fileSize ?? 0)
+    }
+
+    private func moveToCanonicalNameIfNeeded(
+        _ selected: URL?,
+        canonicalName: String,
+        in modelFolder: URL
+    ) throws {
+        guard let selected else { return }
+        let canonicalURL = modelFolder.appendingPathComponent(canonicalName)
+        if selected.standardizedFileURL == canonicalURL.standardizedFileURL {
+            return
+        }
+
+        let fm = FileManager.default
+        if fm.fileExists(atPath: canonicalURL.path) {
+            try fm.removeItem(at: canonicalURL)
+        }
+        try fm.moveItem(at: selected, to: canonicalURL)
+    }
+
+    private func removeNonCanonicalWhisperFiles(in modelFolder: URL) throws {
+        let fm = FileManager.default
+        let entries = try fm.contentsOfDirectory(
+            at: modelFolder,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )
+
+        for entry in entries {
+            let name = entry.lastPathComponent.lowercased()
+            if name == "encoder.onnx" || name == "decoder.onnx" || name == "tokens.txt" {
+                continue
+            }
+
+            if name == "test_wavs" {
+                try? fm.removeItem(at: entry)
+                continue
+            }
+
+            let shouldRemoveEncoderVariant = name.contains("encoder") && name.hasSuffix(".onnx")
+            let shouldRemoveDecoderVariant = name.contains("decoder") && name.hasSuffix(".onnx")
+            let shouldRemoveTokenVariant = name.contains("tokens") && name.hasSuffix(".txt")
+
+            if shouldRemoveEncoderVariant || shouldRemoveDecoderVariant || shouldRemoveTokenVariant {
+                try? fm.removeItem(at: entry)
+            }
+        }
     }
 
     private static func loadAudioData(from url: URL, sampleRate: Double) throws -> (Data, TimeInterval) {
@@ -209,9 +459,47 @@ final class RunAnywhereEngine {
         }
 
         let count = Int(outputBuffer.frameLength)
-        let data = Data(bytes: channelData[0], count: count * MemoryLayout<Float>.size)
+        let data = pcmInt16Data(from: channelData[0], count: count)
         let duration = Double(count) / sampleRate
         return (data, duration)
+    }
+
+    private static func normalizedLanguageCode(_ raw: String, detectLanguage: Bool) -> String {
+        // When detection is enabled, force SDK auto-language mode.
+        if detectLanguage {
+            return ""
+        }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed.caseInsensitiveCompare("auto") == .orderedSame {
+            return ""
+        }
+        return trimmed
+    }
+
+    private static func pcmInt16Data(from floatPointer: UnsafePointer<Float>, count: Int) -> Data {
+        var samples = [Int16]()
+        samples.reserveCapacity(count)
+        for index in 0..<count {
+            let sample = max(-1.0, min(1.0, floatPointer[index]))
+            let scaled = (sample * 32767.0).rounded()
+            samples.append(Int16(scaled))
+        }
+        return samples.withUnsafeBufferPointer { buffer in
+            Data(buffer: buffer)
+        }
+    }
+
+    fileprivate static func pcmInt16Data(from floatSamples: [Float]) -> Data {
+        var samples = [Int16]()
+        samples.reserveCapacity(floatSamples.count)
+        for sample in floatSamples {
+            let clamped = max(-1.0, min(1.0, sample))
+            let scaled = (clamped * 32767.0).rounded()
+            samples.append(Int16(scaled))
+        }
+        return samples.withUnsafeBufferPointer { buffer in
+            Data(buffer: buffer)
+        }
     }
 }
 
@@ -252,7 +540,7 @@ final class RunAnywhereStreamingSession {
                 try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
                 let snapshot = self.buffer.snapshotLast(seconds: self.chunkSeconds + self.overlapSeconds)
                 guard !snapshot.isEmpty else { continue }
-                let data = snapshot.withUnsafeBytes { Data($0) }
+                let data = RunAnywhereEngine.pcmInt16Data(from: snapshot)
                 do {
                     let output = try await RunAnywhere.transcribeStream(audioData: data, options: self.options) { partial in
                         Task { @MainActor in

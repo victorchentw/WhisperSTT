@@ -1,5 +1,90 @@
 import Foundation
 
+struct BenchmarkClip: Identifiable, Hashable {
+    let id: String
+    let displayName: String
+    let audioFileName: String
+    let transcriptFileName: String
+}
+
+enum BenchmarkClipCatalog {
+    static let bundleSubdirectory = "benchmark-clips"
+    static let legacyBundleSubdirectory = "Models/benchmark-clips"
+    static let clips: [BenchmarkClip] = [
+        BenchmarkClip(
+            id: "earnings22_clip_1",
+            displayName: "Earnings22 Clip 1 (~60s)",
+            audioFileName: "earnings22_1_4482311_3_62.wav",
+            transcriptFileName: "earnings22_1_4482311_3_62.txt"
+        ),
+        BenchmarkClip(
+            id: "earnings22_clip_2",
+            displayName: "Earnings22 Clip 2 (~64s)",
+            audioFileName: "earnings22_2_4482249_1600_1664.wav",
+            transcriptFileName: "earnings22_2_4482249_1600_1664.txt"
+        ),
+        BenchmarkClip(
+            id: "earnings22_clip_3",
+            displayName: "Earnings22 Clip 3 (~60s)",
+            audioFileName: "earnings22_3_4483589_261_321.wav",
+            transcriptFileName: "earnings22_3_4483589_261_321.txt"
+        ),
+        BenchmarkClip(
+            id: "fleurs_ja_clip_4",
+            displayName: "FLEURS Japanese Clip 4 (~15s)",
+            audioFileName: "fleurs_ja_1837_clip4.wav",
+            transcriptFileName: "fleurs_ja_1837_clip4.txt"
+        ),
+        BenchmarkClip(
+            id: "fleurs_zh_clip_5",
+            displayName: "FLEURS Chinese Clip 5 (~14s)",
+            audioFileName: "fleurs_zh_1883_clip5.wav",
+            transcriptFileName: "fleurs_zh_1883_clip5.txt"
+        ),
+        BenchmarkClip(
+            id: "fleurs_zh_en_mix_clip_6",
+            displayName: "FLEURS Chinese-English Mix Clip 6 (~14s)",
+            audioFileName: "fleurs_zh_en_mix_1805_1830_clip6.wav",
+            transcriptFileName: "fleurs_zh_en_mix_1805_1830_clip6.txt"
+        )
+    ]
+
+    static func audioURL(for clip: BenchmarkClip) -> URL? {
+        if let url = Bundle.main.url(
+            forResource: clip.audioFileName,
+            withExtension: nil,
+            subdirectory: bundleSubdirectory
+        ) {
+            return url
+        }
+        return Bundle.main.url(
+            forResource: clip.audioFileName,
+            withExtension: nil,
+            subdirectory: legacyBundleSubdirectory
+        )
+    }
+
+    static func transcriptText(for clip: BenchmarkClip) -> String? {
+        guard let url = transcriptURL(for: clip) else { return nil }
+        return try? String(contentsOf: url, encoding: .utf8)
+    }
+
+    private static func transcriptURL(for clip: BenchmarkClip) -> URL? {
+        if let url = Bundle.main.url(
+            forResource: clip.transcriptFileName,
+            withExtension: nil,
+            subdirectory: bundleSubdirectory
+        ) {
+            return url
+        }
+        return Bundle.main.url(
+            forResource: clip.transcriptFileName,
+            withExtension: nil,
+            subdirectory: legacyBundleSubdirectory
+        )
+    }
+}
+
 struct BenchmarkResult: Identifiable {
     let id = UUID()
     let engine: String

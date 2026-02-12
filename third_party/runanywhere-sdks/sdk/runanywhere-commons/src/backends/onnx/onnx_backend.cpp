@@ -8,6 +8,8 @@
 
 #include "onnx_backend.h"
 
+#include <algorithm>
+#include <cctype>
 #include <dirent.h>
 #include <sys/stat.h>
 
@@ -16,6 +18,47 @@
 #include "rac/core/rac_logger.h"
 
 namespace runanywhere {
+
+namespace {
+
+std::string trim_copy(const std::string& input) {
+    auto begin = std::find_if_not(input.begin(), input.end(), [](unsigned char ch) {
+        return std::isspace(ch) != 0;
+    });
+    auto end = std::find_if_not(input.rbegin(), input.rend(), [](unsigned char ch) {
+        return std::isspace(ch) != 0;
+    }).base();
+    if (begin >= end) {
+        return "";
+    }
+    return std::string(begin, end);
+}
+
+std::string normalize_language_for_request(const STTRequest& request) {
+    if (request.detect_language) {
+        return "";
+    }
+    std::string language = trim_copy(request.language);
+    if (language.empty()) {
+        return "";
+    }
+
+    std::string lowered = language;
+    std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    if (lowered == "auto") {
+        return "";
+    }
+
+    return language;
+}
+
+const char* printable_language(const std::string& language) {
+    return language.empty() ? "<auto>" : language.c_str();
+}
+
+}  // namespace
 
 // =============================================================================
 // ONNXBackendNew Implementation
@@ -345,14 +388,47 @@ STTResult ONNXSTT::transcribe(const STTRequest& request) {
     STTResult result;
 
 #if SHERPA_ONNX_AVAILABLE
+    const std::string effective_language = normalize_language_for_request(request);
+
+    bool needs_reload = false;
+    std::string current_language;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!sherpa_recognizer_ || !model_loaded_) {
+            RAC_LOG_ERROR("ONNX.STT", "STT not ready for transcription");
+            result.text = "[Error: STT model not loaded]";
+            return result;
+        }
+        current_language = language_;
+        needs_reload = (effective_language != language_);
+    }
+
+    if (needs_reload) {
+        if (model_dir_.empty()) {
+            RAC_LOG_ERROR("ONNX.STT", "Cannot switch language: model directory missing");
+            result.text = "[Error: STT model path missing]";
+            return result;
+        }
+
+        nlohmann::json reload_config = {{"language", effective_language}};
+        RAC_LOG_INFO("ONNX.STT", "Switching recognizer language from %s to %s",
+                     printable_language(current_language), printable_language(effective_language));
+        if (!load_model(model_dir_, model_type_, reload_config)) {
+            RAC_LOG_ERROR("ONNX.STT", "Failed to reload model for requested language");
+            result.text = "[Error: Failed to switch STT language]";
+            return result;
+        }
+    }
+
+    std::lock_guard<std::mutex> lock(mutex_);
     if (!sherpa_recognizer_ || !model_loaded_) {
         RAC_LOG_ERROR("ONNX.STT", "STT not ready for transcription");
         result.text = "[Error: STT model not loaded]";
         return result;
     }
 
-    RAC_LOG_INFO("ONNX.STT", "Transcribing %zu samples at %d Hz", request.audio_samples.size(),
-                request.sample_rate);
+    RAC_LOG_INFO("ONNX.STT", "Transcribing %zu samples at %d Hz (language=%s)",
+                 request.audio_samples.size(), request.sample_rate, printable_language(language_));
 
     const SherpaOnnxOfflineStream* stream = SherpaOnnxCreateOfflineStream(sherpa_recognizer_);
     if (!stream) {

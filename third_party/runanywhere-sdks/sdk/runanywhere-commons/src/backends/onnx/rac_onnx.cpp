@@ -123,8 +123,11 @@ rac_result_t rac_stt_onnx_transcribe(rac_handle_t handle, const float* audio_sam
     runanywhere::STTRequest request;
     request.audio_samples.assign(audio_samples, audio_samples + num_samples);
     request.sample_rate = (options && options->sample_rate > 0) ? options->sample_rate : 16000;
-    if (options && options->language) {
-        request.language = options->language;
+    if (options) {
+        if (options->language) {
+            request.language = options->language;
+        }
+        request.detect_language = (options->detect_language == RAC_TRUE);
     }
 
     auto result = h->stt->transcribe(request);

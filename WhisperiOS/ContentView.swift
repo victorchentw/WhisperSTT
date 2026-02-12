@@ -15,41 +15,59 @@ struct ContentView: View {
                 }
                 .pickerStyle(.segmented)
 
-                switch model.mode {
-                case .stt:
-                    Picker("Engine", selection: $model.sttEngine) {
-                        ForEach(AppViewModel.SttEngine.allCases, id: \.self) { engine in
-                            Text(engine.rawValue)
+                if model.mode == .benchmark {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 16) {
+                            benchmarkSection
+                            metricsSection
+
+                            if let errorMessage = model.errorMessage {
+                                Text(errorMessage)
+                                    .foregroundColor(.red)
+                                    .font(.footnote)
+                                    .multilineTextAlignment(.center)
+                            }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .pickerStyle(.segmented)
+                    .scrollDismissesKeyboard(.interactively)
+                } else {
+                    switch model.mode {
+                    case .stt:
+                        Picker("Engine", selection: $model.sttEngine) {
+                            ForEach(AppViewModel.SttEngine.allCases, id: \.self) { engine in
+                                Text(engine.rawValue)
+                            }
+                        }
+                        .pickerStyle(.segmented)
 
-                    if model.sttEngine == .nexa {
-                        nexaConfigSection
-                    } else if model.sttEngine == .runAnywhere {
-                        runAnywhereConfigSection
+                        if model.sttEngine == .nexa {
+                            nexaConfigSection
+                        } else if model.sttEngine == .runAnywhere {
+                            runAnywhereConfigSection
+                        }
+
+                        sttSection
+                    case .tts:
+                        ttsSection
+                    case .benchmark:
+                        EmptyView()
                     }
 
-                    sttSection
-                case .tts:
-                    ttsSection
-                case .benchmark:
-                    benchmarkSection
+                    metricsSection
+
+                    if let errorMessage = model.errorMessage {
+                        Text(errorMessage)
+                            .foregroundColor(.red)
+                            .font(.footnote)
+                            .multilineTextAlignment(.center)
+                    }
+
+                    Spacer(minLength: 8)
                 }
-
-                metricsSection
-
-                if let errorMessage = model.errorMessage {
-                    Text(errorMessage)
-                        .foregroundColor(.red)
-                        .font(.footnote)
-                        .multilineTextAlignment(.center)
-                }
-
-                Spacer(minLength: 8)
             }
             .padding()
-            .navigationTitle("Razer Whisper")
+            .navigationTitle("STT Solution Tester")
             .overlay(alignment: .top) {
                 if let toast = model.toast {
                     ToastView(text: toast.text)
@@ -256,7 +274,7 @@ struct ContentView: View {
                 Text("Language")
                     .font(.footnote)
                     .foregroundColor(.secondary)
-                TextField("en / zh / auto", text: $model.runAnywhereLanguage)
+                TextField("auto / en / zh / ja", text: $model.runAnywhereLanguage)
                     .textFieldStyle(.roundedBorder)
             }
             Toggle("Detect language", isOn: $model.runAnywhereDetectLanguage)
@@ -271,6 +289,43 @@ struct ContentView: View {
             Text("Benchmark uses clip audio for consistent WER/CER.")
                 .font(.caption)
                 .foregroundColor(.secondary)
+
+            Text("Benchmark clip")
+                .font(.footnote)
+                .foregroundColor(.secondary)
+
+            Picker("Benchmark clip", selection: $model.benchmarkSelectedClipId) {
+                Text("Recorded audio").tag(AppViewModel.benchmarkRecordedSourceId)
+                ForEach(model.benchmarkBundledClips) { clip in
+                    Text(clip.displayName).tag(clip.id)
+                }
+            }
+            .pickerStyle(.menu)
+
+            if let clip = model.selectedBenchmarkClip {
+                Text("Clip file: \(clip.audioFileName)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Text("Transcript source")
+                .font(.footnote)
+                .foregroundColor(.secondary)
+
+            Picker("Transcript source", selection: $model.benchmarkSelectedTranscriptId) {
+                Text("Manual text").tag(AppViewModel.benchmarkManualTranscriptId)
+                ForEach(model.benchmarkBundledClips) { clip in
+                    Text("\(clip.displayName) TXT").tag(clip.id)
+                }
+            }
+            .pickerStyle(.menu)
+
+            if model.benchmarkSelectedTranscriptId != AppViewModel.benchmarkManualTranscriptId,
+               let clip = model.selectedBenchmarkTranscriptClip {
+                Text("Transcript file: \(clip.transcriptFileName)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
 
             Toggle("Include WhisperKit", isOn: $model.benchmarkIncludeWhisper)
                 .font(.footnote)
@@ -314,13 +369,15 @@ struct ContentView: View {
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.3)))
 
             HStack(spacing: 12) {
-                Button {
-                    model.toggleBenchmarkRecording()
-                } label: {
-                    Label(model.benchmarkRecordButtonTitle, systemImage: model.benchmarkRecordButtonIcon)
+                if model.benchmarkUsesRecordedAudio {
+                    Button {
+                        model.toggleBenchmarkRecording()
+                    } label: {
+                        Label(model.benchmarkRecordButtonTitle, systemImage: model.benchmarkRecordButtonIcon)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(model.benchmarkIsRecording ? .red : .blue)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(model.benchmarkIsRecording ? .red : .blue)
 
                 Button {
                     model.runBenchmark()
@@ -332,7 +389,7 @@ struct ContentView: View {
             }
 
             if let url = model.benchmarkAudioURL {
-                Text("Benchmark audio: \(url.lastPathComponent)")
+                Text(model.benchmarkUsesRecordedAudio ? "Recorded audio: \(url.lastPathComponent)" : "Benchmark audio: \(url.lastPathComponent)")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -567,6 +624,8 @@ final class AppViewModel: ObservableObject {
 
     static let customNexaModelId = "__custom__"
     static let customRunAnywhereModelId = "__custom__"
+    static let benchmarkRecordedSourceId = "__recorded__"
+    static let benchmarkManualTranscriptId = "__manual_transcript__"
 
     @Published var mode: Mode = .stt {
         didSet {
@@ -631,7 +690,7 @@ final class AppViewModel: ObservableObject {
     }
     @Published var runAnywhereSelectedModelId: String = RunAnywhereModelCatalog.models.first?.id ?? AppViewModel.customRunAnywhereModelId
     @Published var runAnywhereCustomModelId: String = ""
-    @Published var runAnywhereLanguage: String = "en"
+    @Published var runAnywhereLanguage: String = "auto"
     @Published var runAnywhereDetectLanguage: Bool = true
     @Published var runAnywhereChunkSeconds: Double = 3.0 {
         didSet {
@@ -665,6 +724,18 @@ final class AppViewModel: ObservableObject {
     @Published var streamingUseVAD: Bool = true
     @Published var streamingSilenceThreshold: Double = 0.3
 
+    @Published var benchmarkSelectedClipId: String = AppViewModel.benchmarkRecordedSourceId {
+        didSet {
+            guard oldValue != benchmarkSelectedClipId else { return }
+            applyBenchmarkClipSelection()
+        }
+    }
+    @Published var benchmarkSelectedTranscriptId: String = AppViewModel.benchmarkManualTranscriptId {
+        didSet {
+            guard oldValue != benchmarkSelectedTranscriptId else { return }
+            applyBenchmarkTranscriptSelection()
+        }
+    }
     @Published var benchmarkReferenceText: String = ""
     @Published var benchmarkAudioURL: URL?
     @Published var benchmarkIsRecording: Bool = false
@@ -687,6 +758,15 @@ final class AppViewModel: ObservableObject {
     private var nexaStreamingTask: Task<Void, Never>?
     private var runAnywhereStreamingSession: RunAnywhereStreamingSession?
     private var lastStreamingText: String = ""
+
+    init() {
+        if let firstClip = benchmarkBundledClips.first {
+            benchmarkSelectedClipId = firstClip.id
+            benchmarkSelectedTranscriptId = firstClip.id
+            applyBenchmarkClipSelection()
+            applyBenchmarkTranscriptSelection()
+        }
+    }
 
     var isSttActive: Bool {
         sttMode == .streaming ? isStreaming : isRecording
@@ -712,6 +792,22 @@ final class AppViewModel: ObservableObject {
 
     var runAnywhereBundledModels: [BundledModel] {
         RunAnywhereModelCatalog.models
+    }
+
+    var benchmarkBundledClips: [BenchmarkClip] {
+        BenchmarkClipCatalog.clips
+    }
+
+    var benchmarkUsesRecordedAudio: Bool {
+        benchmarkSelectedClipId == Self.benchmarkRecordedSourceId
+    }
+
+    var selectedBenchmarkClip: BenchmarkClip? {
+        benchmarkBundledClips.first { $0.id == benchmarkSelectedClipId }
+    }
+
+    var selectedBenchmarkTranscriptClip: BenchmarkClip? {
+        benchmarkBundledClips.first { $0.id == benchmarkSelectedTranscriptId }
     }
 
     var nexaSelectedModelIsReady: Bool {
@@ -801,6 +897,54 @@ final class AppViewModel: ObservableObject {
         benchmarkIsRecording ? "stop.circle.fill" : "mic.circle.fill"
     }
 
+    private func applyBenchmarkClipSelection() {
+        if benchmarkSelectedClipId == Self.benchmarkRecordedSourceId {
+            if benchmarkAudioURL == nil {
+                benchmarkStatus = "Record benchmark audio or choose a bundled clip."
+            } else {
+                benchmarkStatus = "Benchmark audio ready."
+            }
+            return
+        }
+
+        guard let clip = selectedBenchmarkClip else {
+            benchmarkAudioURL = nil
+            benchmarkStatus = "Invalid benchmark clip."
+            errorMessage = "Selected benchmark clip not found."
+            return
+        }
+
+        guard let audioURL = BenchmarkClipCatalog.audioURL(for: clip) else {
+            benchmarkAudioURL = nil
+            benchmarkStatus = "Bundled benchmark clip missing."
+            errorMessage = "Bundled benchmark clip missing: \(clip.audioFileName)"
+            return
+        }
+
+        benchmarkAudioURL = audioURL
+        benchmarkStatus = "Bundled clip ready."
+        logEvent("Benchmark clip selected: \(clip.audioFileName)")
+    }
+
+    private func applyBenchmarkTranscriptSelection() {
+        guard benchmarkSelectedTranscriptId != Self.benchmarkManualTranscriptId else {
+            return
+        }
+
+        guard let clip = selectedBenchmarkTranscriptClip else {
+            errorMessage = "Selected transcript clip not found."
+            return
+        }
+
+        guard let text = BenchmarkClipCatalog.transcriptText(for: clip) else {
+            errorMessage = "Bundled transcript missing: \(clip.transcriptFileName)"
+            return
+        }
+
+        benchmarkReferenceText = text
+        logEvent("Benchmark transcript selected: \(clip.transcriptFileName)")
+    }
+
     func toggleRecording() {
         switch sttMode {
         case .clip:
@@ -843,6 +987,7 @@ final class AppViewModel: ObservableObject {
         if isStreaming {
             Task { await stopStreaming() }
         }
+        benchmarkSelectedClipId = Self.benchmarkRecordedSourceId
 
         errorMessage = nil
         benchmarkStatus = "Requesting microphone..."
@@ -872,6 +1017,7 @@ final class AppViewModel: ObservableObject {
         let audioURL = recorder.stopRecording()
         benchmarkIsRecording = false
         if let audioURL {
+            benchmarkSelectedClipId = Self.benchmarkRecordedSourceId
             benchmarkAudioURL = audioURL
             benchmarkStatus = "Benchmark audio ready."
             logEvent("Benchmark recording saved: \(audioURL.lastPathComponent)")
@@ -884,7 +1030,7 @@ final class AppViewModel: ObservableObject {
     func runBenchmark() {
         guard !benchmarkIsRunning else { return }
         guard let audioURL = benchmarkAudioURL else {
-            errorMessage = "Record benchmark audio first."
+            errorMessage = "Select a bundled benchmark clip or record benchmark audio first."
             benchmarkStatus = "Missing audio"
             return
         }
@@ -911,8 +1057,13 @@ final class AppViewModel: ObservableObject {
         let runAnywhere = self.runAnywhere
         let nexaModels = self.nexaBundledModels
         let runAnywhereModels = self.runAnywhereBundledModels
-        let runAnywhereLanguage = self.runAnywhereLanguage
-        let runAnywhereDetect = self.runAnywhereDetectLanguage
+        // Benchmark should always use language auto-detection for fair multilingual comparison.
+        let runAnywhereLanguage = "auto"
+        let runAnywhereDetect = true
+
+        if hasRunAnywhere {
+            logEvent("Benchmark RunAnywhere language forced to auto-detect")
+        }
 
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
@@ -1082,7 +1233,7 @@ final class AppViewModel: ObservableObject {
                 case .nexa:
                     result = try await nexa.transcribe(audioURL: audioURL, modelPath: nexaPath)
                 case .runAnywhere:
-                    let language = runAnywhereLanguage.isEmpty ? "en" : runAnywhereLanguage
+                    let language = runAnywhereLanguage.isEmpty ? "auto" : runAnywhereLanguage
                     result = try await runAnywhere.transcribe(
                         audioURL: audioURL,
                         modelId: runAnywhereModelId,
@@ -1329,7 +1480,7 @@ final class AppViewModel: ObservableObject {
             do {
                 let session = try await self.runAnywhere.startChunkedStreaming(
                     modelId: modelId,
-                    language: language.isEmpty ? "en" : language,
+                    language: language.isEmpty ? "auto" : language,
                     detectLanguage: detect,
                     chunkSeconds: chunkSeconds,
                     overlapSeconds: overlapSeconds

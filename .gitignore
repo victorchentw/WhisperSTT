@@ -26,6 +26,9 @@ local.properties
 WhisperKit/
 whisper/
 
+# Local binary backups
+third_party/runanywhere-sdks/sdk/runanywhere-swift/Binaries.local-backup-*/
+
 # Large model archives
 WhisperAndroid/app/src/main/assets/models/whisper/tiny/*.tar.bz2
 

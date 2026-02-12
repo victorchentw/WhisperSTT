@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		0361E0D8183CBC6B3EA892AC /* Models/tokenizers/openai-whisper-tiny in Resources */ = {isa = PBXBuildFile; fileRef = F052BA8D70DE2E22291AEF34 /* Models/tokenizers/openai-whisper-tiny */; };
+		C1B2D3E4F5A60718293A4B91 /* Models/benchmark-clips in Resources */ = {isa = PBXBuildFile; fileRef = C1B2D3E4F5A60718293A4B90 /* Models/benchmark-clips */; };
 		3833C54F697BE3881B83B336 /* RunAnywhere in Frameworks */ = {isa = PBXBuildFile; productRef = BF874124F3EFA01789B7A05C /* RunAnywhere */; };
 		AEAB8B4CFC7D161A5B8B5315 /* RunAnywhereONNX in Frameworks */ = {isa = PBXBuildFile; productRef = 5E2221C97D7F3B003027126D /* RunAnywhereONNX */; };
 		B8C3B27EA67B7744A024E48E /* NexaSdk in Frameworks */ = {isa = PBXBuildFile; productRef = 9F322C1C5A637B2155967C34 /* NexaSdk */; };
@@ -45,6 +46,7 @@
 		A1B2C3D4E5F60718293A4B77 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4B78 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		D4D59ED01573AC49D1BCD67E /* StreamingTranscriber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingTranscriber.swift; sourceTree = "<group>"; };
+		C1B2D3E4F5A60718293A4B90 /* Models/benchmark-clips */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "benchmark-clips"; sourceTree = "<group>"; };
 		D92B8CE0D6F4DD2C04DBEFD0 /* Models/runanywhere */ = {isa = PBXFileReference; lastKnownFileType = folder; path = runanywhere; sourceTree = "<group>"; };
 		E949E7968A08AAF2E4C47AF9 /* Models/nexa */ = {isa = PBXFileReference; lastKnownFileType = folder; path = nexa; sourceTree = "<group>"; };
 		F052BA8D70DE2E22291AEF34 /* Models/tokenizers/openai-whisper-tiny */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "tokenizers/openai-whisper-tiny"; sourceTree = "<group>"; };
@@ -117,6 +119,7 @@
 				F052BA8D70DE2E22291AEF34 /* Models/tokenizers/openai-whisper-tiny */,
 				E949E7968A08AAF2E4C47AF9 /* Models/nexa */,
 				D92B8CE0D6F4DD2C04DBEFD0 /* Models/runanywhere */,
+				C1B2D3E4F5A60718293A4B90 /* Models/benchmark-clips */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -192,6 +195,7 @@
 			files = (
 				7FDB2696241D05608A903B02 /* Models/whisperkit-coreml/openai_whisper-tiny in Resources */,
 				0361E0D8183CBC6B3EA892AC /* Models/tokenizers/openai-whisper-tiny in Resources */,
+				C1B2D3E4F5A60718293A4B91 /* Models/benchmark-clips in Resources */,
 				A61C4DF9DF50CA4254C6402F /* Models/nexa in Resources */,
 				7D8EAC58881E456A167C1561 /* Models/runanywhere in Resources */,
 				A1B2C3D4E5F60718293A4B86 /* Assets.xcassets in Resources */,
