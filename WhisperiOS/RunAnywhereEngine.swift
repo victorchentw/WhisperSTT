@@ -26,6 +26,7 @@ enum RunAnywhereEngineError: LocalizedError {
 final class RunAnywhereEngine {
     private var isInitialized = false
     private var loadedModelId: String?
+    private var streamingSession: RunAnywhereStreamingSession?
     private let sampleRate: Double = 16_000
     // RunAnywhere ONNX backend currently processes only < 30s per request.
     private let maxClipSecondsPerRequest: Double = 29.0
@@ -165,6 +166,11 @@ final class RunAnywhereEngine {
         )
         try session.start()
         return session
+    }
+
+    func stopStreaming() async {
+        streamingSession?.stop()
+        streamingSession = nil
     }
 
     private func ensureInitialized() async throws {
@@ -498,6 +504,40 @@ final class RunAnywhereEngine {
         return samples.withUnsafeBufferPointer { buffer in
             Data(buffer: buffer)
         }
+    }
+}
+
+extension RunAnywhereEngine: STTStreamingEngine {
+    var displayName: String {
+        "RunAnywhere"
+    }
+
+    func prepareStreaming(config: STTStreamingStartConfig) async throws {
+        guard case .runAnywhere(let request) = config else {
+            throw STTStreamingConfigError.invalidConfig(engine: displayName)
+        }
+        try await prepareModel(modelId: request.modelId)
+    }
+
+    func startStreaming(
+        config: STTStreamingStartConfig,
+        onUpdate: @escaping (STTStreamingUpdate) -> Void
+    ) async throws {
+        guard case .runAnywhere(let request) = config else {
+            throw STTStreamingConfigError.invalidConfig(engine: displayName)
+        }
+
+        streamingSession?.stop()
+        let session = try await startChunkedStreaming(
+            modelId: request.modelId,
+            language: request.language,
+            detectLanguage: request.detectLanguage,
+            chunkSeconds: request.chunkSeconds,
+            overlapSeconds: request.overlapSeconds
+        ) { text in
+            onUpdate(.appendChunk(text))
+        }
+        streamingSession = session
     }
 }
 

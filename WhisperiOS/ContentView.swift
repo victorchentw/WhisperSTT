@@ -755,8 +755,7 @@ final class AppViewModel: ObservableObject {
     private let tts = TTSService()
     private var toastTask: Task<Void, Never>?
     private var streamingTask: Task<Void, Never>?
-    private var nexaStreamingTask: Task<Void, Never>?
-    private var runAnywhereStreamingSession: RunAnywhereStreamingSession?
+    private var activeStreamingEngine: SttEngine?
     private var lastStreamingText: String = ""
 
     init() {
@@ -1319,269 +1318,148 @@ final class AppViewModel: ObservableObject {
     }
 
     private func startStreaming() {
-        switch sttEngine {
-        case .whisper:
-            startWhisperStreaming()
-        case .nexa:
-            startNexaStreaming()
-        case .runAnywhere:
-            startRunAnywhereStreaming()
-        }
-    }
+        let selectedEngine = sttEngine
+        let engine = streamingEngine(for: selectedEngine)
+        guard let config = streamingConfig(for: selectedEngine) else { return }
 
-    private func startWhisperStreaming() {
         errorMessage = nil
         metrics = nil
         sttText = ""
         lastStreamingText = ""
         isStreaming = true
-        statusText = "Initializing WhisperKit model..."
-        logEvent("Streaming started")
-
-        let config = StreamingConfig(
-            minBufferSeconds: streamingMinBufferSeconds,
-            requiredSegmentsForConfirmation: streamingConfirmSegments,
-            silenceThreshold: Float(streamingSilenceThreshold),
-            compressionCheckWindow: 60,
-            useVAD: streamingUseVAD
-        )
+        activeStreamingEngine = selectedEngine
+        statusText = "Initializing \(engine.displayName) model..."
+        logEvent("\(engine.displayName) streaming started")
 
         streamingTask?.cancel()
-        streamingTask = Task.detached(priority: .userInitiated) { [weak self] in
-            guard let self else { return }
-            let granted = await AudioProcessor.requestRecordPermission()
-            guard granted else {
-                await MainActor.run {
-                    self.errorMessage = "Microphone permission denied. Enable it in Settings."
-                    self.statusText = "Permission denied"
-                    self.isStreaming = false
-                    self.logEvent("Microphone permission denied")
-                }
-                return
-            }
-            await MainActor.run {
-                self.statusText = "Initializing WhisperKit model..."
-                self.logEvent("WhisperKit model initialization started", showToast: false)
-            }
-            do {
-                try await self.whisper.prepareModel()
-                await MainActor.run {
-                    self.statusText = "Starting stream..."
-                    self.logEvent("WhisperKit model initialization completed", showToast: false)
-                }
-            } catch {
-                await MainActor.run {
-                    self.errorMessage = error.localizedDescription
-                    self.statusText = "Error"
-                    self.isStreaming = false
-                    self.logEvent("Whisper model init error: \(error.localizedDescription)")
-                }
-                return
-            }
-            do {
-                try AudioRecorder.configureSessionForVoiceProcessing()
-            } catch {
-                await MainActor.run {
-                    self.errorMessage = error.localizedDescription
-                    self.statusText = "Audio session error"
-                    self.isStreaming = false
-                    self.logEvent("Audio session error: \(error.localizedDescription)")
-                }
-                return
-            }
-            do {
-                try await self.whisper.startStreaming(config: config) { state in
-                    Task { @MainActor in
-                        self.updateStreamingState(state)
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    self.errorMessage = error.localizedDescription
-                    self.statusText = "Error"
-                    self.isStreaming = false
-                    self.logEvent("Streaming error: \(error.localizedDescription)")
-                }
-            }
-        }
-    }
-
-    private func stopStreaming() async {
-        guard isStreaming else { return }
-        switch sttEngine {
-        case .whisper:
-            await stopWhisperStreaming()
-        case .nexa:
-            await stopNexaStreaming()
-        case .runAnywhere:
-            await stopRunAnywhereStreaming()
-        }
-    }
-
-    private func stopWhisperStreaming() async {
-        statusText = "Stopping..."
-        logEvent("Streaming stop requested")
-        await whisper.stopStreaming()
-        AudioRecorder.deactivateSession()
-        isStreaming = false
-        streamingTask?.cancel()
-        streamingTask = nil
-        statusText = "Done"
-        logEvent("Streaming stopped")
-    }
-
-    private func startNexaStreaming() {
-        errorMessage = nil
-        metrics = nil
-        sttText = ""
-        lastStreamingText = ""
-        isStreaming = true
-        statusText = "Initializing Nexa model..."
-        logEvent("Nexa streaming started")
-
-        let config = NexaStreamingConfig(
-            language: nexaLanguage,
-            chunkSeconds: nexaChunkSeconds,
-            overlapSeconds: nexaOverlapSeconds
-        )
-        let nexa = self.nexa
-        let nexaPath = self.resolvedNexaModelPathForExecution()
-
-        guard !nexaPath.isEmpty else {
-            errorMessage = "Nexa model path is missing."
-            statusText = "Error"
-            isStreaming = false
-            logEvent("Nexa model path missing")
-            return
-        }
-
-        nexaStreamingTask?.cancel()
-        nexaStreamingTask = Task(priority: .userInitiated) { [weak self] in
+        streamingTask = Task(priority: .userInitiated) { [weak self] in
             guard let self else { return }
             let granted = await AudioProcessor.requestRecordPermission()
             guard granted else {
                 self.errorMessage = "Microphone permission denied. Enable it in Settings."
                 self.statusText = "Permission denied"
                 self.isStreaming = false
+                self.activeStreamingEngine = nil
                 self.logEvent("Microphone permission denied")
                 return
             }
 
-            self.logEvent("Nexa streaming microphone granted", showToast: false)
             do {
-                self.statusText = "Initializing Nexa model..."
-                self.logEvent("Nexa model initialization started", showToast: false)
-                try await nexa.prepareModel(modelPath: nexaPath)
+                self.statusText = "Initializing \(engine.displayName) model..."
+                self.logEvent("\(engine.displayName) model initialization started", showToast: false)
+                try await engine.prepareStreaming(config: config)
                 self.statusText = "Starting stream..."
-                self.logEvent("Nexa model initialization completed", showToast: false)
-                try await nexa.startStreaming(modelPath: nexaPath, config: config) { text in
+                self.logEvent("\(engine.displayName) model initialization completed", showToast: false)
+                try await engine.startStreaming(config: config) { update in
                     Task { @MainActor in
-                        self.updateChunkedStreamingText(text)
+                        self.applyStreamingUpdate(update)
                     }
                 }
             } catch is CancellationError {
-                self.logEvent("Nexa streaming cancelled", showToast: false)
+                self.logEvent("\(engine.displayName) streaming cancelled", showToast: false)
             } catch {
                 self.errorMessage = error.localizedDescription
                 self.statusText = "Error"
                 self.isStreaming = false
-                self.logEvent("Nexa streaming error: \(error.localizedDescription)")
+                self.activeStreamingEngine = nil
+                self.logEvent("\(engine.displayName) streaming error: \(error.localizedDescription)")
             }
         }
     }
 
-    private func stopNexaStreaming() async {
+    private func stopStreaming() async {
+        guard isStreaming else { return }
+        let engineId = activeStreamingEngine ?? sttEngine
+        let engine = streamingEngine(for: engineId)
         statusText = "Stopping..."
-        logEvent("Nexa streaming stop requested")
-        nexa.stopStreaming()
+        logEvent("\(engine.displayName) streaming stop requested")
+
+        streamingTask?.cancel()
+        streamingTask = nil
+        await engine.stopStreaming()
         AudioRecorder.deactivateSession()
         isStreaming = false
-        nexaStreamingTask?.cancel()
-        nexaStreamingTask = nil
+        activeStreamingEngine = nil
         statusText = "Done"
-        logEvent("Nexa streaming stopped")
+        logEvent("\(engine.displayName) streaming stopped")
     }
 
-    private func startRunAnywhereStreaming() {
-        errorMessage = nil
-        metrics = nil
-        sttText = ""
-        lastStreamingText = ""
-        isStreaming = true
-        statusText = "Initializing RunAnywhere model..."
-        logEvent("RunAnywhere streaming started")
-        runAnywhereStreamingSession?.stop()
-        runAnywhereStreamingSession = nil
-
-        let modelId = resolvedRunAnywhereModelId
-        let language = runAnywhereLanguage.trimmingCharacters(in: .whitespacesAndNewlines)
-        let detect = runAnywhereDetectLanguage
-        let chunkSeconds = runAnywhereChunkSeconds
-        let overlapSeconds = runAnywhereOverlapSeconds
-
-        guard !modelId.isEmpty else {
-            errorMessage = "RunAnywhere model ID is missing."
-            statusText = "Error"
-            isStreaming = false
-            logEvent("RunAnywhere model ID missing")
-            return
+    private func streamingEngine(for engine: SttEngine) -> any STTStreamingEngine {
+        switch engine {
+        case .whisper:
+            return whisper
+        case .nexa:
+            return nexa
+        case .runAnywhere:
+            return runAnywhere
         }
+    }
 
-        Task.detached(priority: .userInitiated) { [weak self] in
-            guard let self else { return }
-            let granted = await AudioProcessor.requestRecordPermission()
-            guard granted else {
-                await MainActor.run {
-                    self.errorMessage = "Microphone permission denied. Enable it in Settings."
-                    self.statusText = "Permission denied"
-                    self.isStreaming = false
-                    self.logEvent("Microphone permission denied")
-                }
-                return
+    private func streamingConfig(for engine: SttEngine) -> STTStreamingStartConfig? {
+        switch engine {
+        case .whisper:
+            return .whisper(
+                StreamingConfig(
+                    minBufferSeconds: streamingMinBufferSeconds,
+                    requiredSegmentsForConfirmation: streamingConfirmSegments,
+                    silenceThreshold: Float(streamingSilenceThreshold),
+                    compressionCheckWindow: 60,
+                    useVAD: streamingUseVAD
+                )
+            )
+        case .nexa:
+            let nexaPath = resolvedNexaModelPathForExecution()
+            guard !nexaPath.isEmpty else {
+                errorMessage = "Nexa model path is missing."
+                statusText = "Error"
+                logEvent("Nexa model path missing")
+                return nil
             }
-            do {
-                await MainActor.run {
-                    self.statusText = "Initializing RunAnywhere model..."
-                    self.logEvent("RunAnywhere model initialization started", showToast: false)
-                }
-                try await self.runAnywhere.prepareModel(modelId: modelId)
-                await MainActor.run {
-                    self.statusText = "Starting stream..."
-                    self.logEvent("RunAnywhere model initialization completed", showToast: false)
-                }
-                let session = try await self.runAnywhere.startChunkedStreaming(
+            let config = NexaStreamingConfig(
+                language: nexaLanguage,
+                chunkSeconds: nexaChunkSeconds,
+                overlapSeconds: nexaOverlapSeconds
+            )
+            return .nexa(
+                NexaStreamingStartConfig(
+                    modelPath: nexaPath,
+                    config: config
+                )
+            )
+        case .runAnywhere:
+            let modelId = resolvedRunAnywhereModelId
+            guard !modelId.isEmpty else {
+                errorMessage = "RunAnywhere model ID is missing."
+                statusText = "Error"
+                logEvent("RunAnywhere model ID missing")
+                return nil
+            }
+            let language = runAnywhereLanguage.trimmingCharacters(in: .whitespacesAndNewlines)
+            return .runAnywhere(
+                RunAnywhereStreamingStartConfig(
                     modelId: modelId,
                     language: language.isEmpty ? "auto" : language,
-                    detectLanguage: detect,
-                    chunkSeconds: chunkSeconds,
-                    overlapSeconds: overlapSeconds
-                ) { text in
-                    Task { @MainActor in
-                        self.updateChunkedStreamingText(text)
-                    }
-                }
-                await MainActor.run {
-                    self.runAnywhereStreamingSession = session
-                }
-            } catch {
-                await MainActor.run {
-                    self.errorMessage = error.localizedDescription
-                    self.statusText = "Error"
-                    self.isStreaming = false
-                    self.logEvent("RunAnywhere streaming error: \(error.localizedDescription)")
-                }
-            }
+                    detectLanguage: runAnywhereDetectLanguage,
+                    chunkSeconds: runAnywhereChunkSeconds,
+                    overlapSeconds: runAnywhereOverlapSeconds
+                )
+            )
         }
     }
 
-    private func stopRunAnywhereStreaming() async {
-        statusText = "Stopping..."
-        logEvent("RunAnywhere streaming stop requested")
-        runAnywhereStreamingSession?.stop()
-        runAnywhereStreamingSession = nil
-        isStreaming = false
-        statusText = "Done"
-        logEvent("RunAnywhere streaming stopped")
+    private func applyStreamingUpdate(_ update: STTStreamingUpdate) {
+        switch update {
+        case .replaceText(let text):
+            let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            sttText = normalized
+            statusText = normalized.isEmpty ? "Listening..." : "Streaming..."
+            if normalized != lastStreamingText {
+                lastStreamingText = normalized
+                logEvent("Streaming update (\(normalized.count) chars)", showToast: false)
+            }
+        case .appendChunk(let text):
+            updateChunkedStreamingText(text)
+        }
     }
 
     private func startSpeaking() {
@@ -1602,30 +1480,6 @@ final class AppViewModel: ObservableObject {
                 self?.statusText = "Done"
                 self?.logEvent("TTS finished in \(String(format: "%.2f", total))s")
             }
-        }
-    }
-
-    private func updateStreamingState(_ state: StreamingState) {
-        let confirmed = state.confirmedSegments.map { $0.text }.joined(separator: " ")
-        let unconfirmed = state.unconfirmedSegments.map { $0.text }.joined(separator: " ")
-        var current = state.currentText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if current == "Waiting for speech..." {
-            current = ""
-        }
-        let combined = [confirmed, unconfirmed, current]
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
-
-        sttText = combined
-
-        if state.isRecording {
-            statusText = current.isEmpty ? "Listening..." : "Streaming..."
-        }
-
-        if combined != lastStreamingText {
-            lastStreamingText = combined
-            logEvent("Streaming update (\(combined.count) chars)", showToast: false)
         }
     }
 

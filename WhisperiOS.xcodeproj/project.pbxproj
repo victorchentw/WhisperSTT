@@ -23,6 +23,8 @@
 		A1B2C3D4E5F60718293A4B82 /* AudioRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B72 /* AudioRecorder.swift */; };
 		A1B2C3D4E5F60718293A4B83 /* TTSService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B73 /* TTSService.swift */; };
 		A1B2C3D4E5F60718293A4B84 /* WhisperEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B74 /* WhisperEngine.swift */; };
+		D4C3B2A1908F7E6D5C4B3A21 /* STTStreamingEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A1B2D3E4F5678901A2B3C4 /* STTStreamingEngine.swift */; };
+		F4D2A1B390E8C7D6B5A4F321 /* NexaEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9C1F3A41B6D7E8092A3BC4D /* NexaEngine.swift */; };
 		A1B2C3D4E5F60718293A4B85 /* PerformanceMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B75 /* PerformanceMetrics.swift */; };
 		A1B2C3D4E5F60718293A4B86 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B76 /* Assets.xcassets */; };
 		A1B2C3D4E5F60718293A4B87 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B77 /* LaunchScreen.storyboard */; };
@@ -41,6 +43,8 @@
 		A1B2C3D4E5F60718293A4B72 /* AudioRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorder.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4B73 /* TTSService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSService.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4B74 /* WhisperEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperEngine.swift; sourceTree = "<group>"; };
+		C5A1B2D3E4F5678901A2B3C4 /* STTStreamingEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STTStreamingEngine.swift; sourceTree = "<group>"; };
+		E9C1F3A41B6D7E8092A3BC4D /* NexaEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NexaEngine.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4B75 /* PerformanceMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceMetrics.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4B76 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4B77 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
@@ -92,6 +96,8 @@
 				D4D59ED01573AC49D1BCD67E /* StreamingTranscriber.swift */,
 				A1B2C3D4E5F60718293A4B73 /* TTSService.swift */,
 				A1B2C3D4E5F60718293A4B74 /* WhisperEngine.swift */,
+				C5A1B2D3E4F5678901A2B3C4 /* STTStreamingEngine.swift */,
+				E9C1F3A41B6D7E8092A3BC4D /* NexaEngine.swift */,
 				8E3F9C27BCD478A66EF0D916 /* RunAnywhereEngine.swift */,
 				99BBDBCFBEAF3A3934ED14C5 /* ModelCatalog.swift */,
 				CCD26817EAAB201854AD5ADC /* Benchmarking.swift */,
@@ -216,6 +222,8 @@
 				CFBB9D4F6D1CCC995D809639 /* StreamingTranscriber.swift in Sources */,
 				A1B2C3D4E5F60718293A4B83 /* TTSService.swift in Sources */,
 				A1B2C3D4E5F60718293A4B84 /* WhisperEngine.swift in Sources */,
+				D4C3B2A1908F7E6D5C4B3A21 /* STTStreamingEngine.swift in Sources */,
+				F4D2A1B390E8C7D6B5A4F321 /* NexaEngine.swift in Sources */,
 				73FA9C68AAB8A70911A70F6F /* RunAnywhereEngine.swift in Sources */,
 				A66900DA5563B6BDD8DAECA2 /* ModelCatalog.swift in Sources */,
 				B581FEAAC5A675D14117D0DD /* Benchmarking.swift in Sources */,
