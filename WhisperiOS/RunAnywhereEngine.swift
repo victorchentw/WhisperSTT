@@ -536,22 +536,45 @@ final class RunAnywhereStreamingSession {
         let interval = max(0.5, chunkSeconds - overlapSeconds)
         task = Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
+            var useNativeStreaming = await CppBridge.STT.shared.supportsStreaming
+            if !useNativeStreaming {
+                print("[RunAnywhereStreamingSession] Native streaming is not supported for current model/backend; fallback to chunked transcribeWithOptions.")
+            }
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
                 let snapshot = self.buffer.snapshotLast(seconds: self.chunkSeconds + self.overlapSeconds)
                 guard !snapshot.isEmpty else { continue }
                 let data = RunAnywhereEngine.pcmInt16Data(from: snapshot)
-                do {
-                    let output = try await RunAnywhere.transcribeStream(audioData: data, options: self.options) { partial in
-                        Task { @MainActor in
-                            self.onText(partial.transcript)
+
+                if useNativeStreaming {
+                    do {
+                        let output = try await RunAnywhere.transcribeStream(
+                            audioData: data,
+                            options: self.options
+                        ) { partial in
+                            Task { @MainActor in
+                                self.onText(partial.transcript)
+                            }
                         }
+                        Task { @MainActor in
+                            self.onText(output.text)
+                        }
+                        continue
+                    } catch {
+                        // Some backends report streaming support but fail at runtime.
+                        // Keep session alive by falling back to chunked full decode.
+                        print("[RunAnywhereStreamingSession] Native streaming failed (\(error.localizedDescription)); fallback to chunked transcribeWithOptions.")
+                        useNativeStreaming = false
                     }
+                }
+
+                do {
+                    let output = try await RunAnywhere.transcribeWithOptions(data, options: self.options)
                     Task { @MainActor in
                         self.onText(output.text)
                     }
                 } catch {
-                    continue
+                    print("[RunAnywhereStreamingSession] Chunked fallback decode failed: \(error.localizedDescription)")
                 }
             }
         }
@@ -587,9 +610,12 @@ private final class AudioSampleBuffer {
     }
 
     func snapshotLast(seconds: Double) -> [Float] {
-        let count = min(samples.count, Int(sampleRate * seconds))
-        guard count > 0 else { return [] }
         lock.lock()
+        let count = min(samples.count, Int(sampleRate * seconds))
+        guard count > 0 else {
+            lock.unlock()
+            return []
+        }
         let result = Array(samples.suffix(count))
         lock.unlock()
         return result
