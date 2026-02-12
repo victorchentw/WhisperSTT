@@ -52,15 +52,24 @@ final class WhisperEngine: WhisperTranscribing {
         self.tokenizerFolderURL = tokenizerFolderURL
     }
 
-    func transcribe(audioURL: URL) async throws -> WhisperTranscriptionResult {
+    func prepareModel() async throws {
         guard let modelFolderURL else {
             throw WhisperEngineError.modelMissing
         }
         guard let tokenizerFolderURL else {
             throw WhisperEngineError.tokenizerMissing
         }
+        _ = try await loadWhisperKit(
+            modelFolderURL: modelFolderURL,
+            tokenizerFolderURL: tokenizerFolderURL
+        )
+    }
 
-        let whisperKit = try await loadWhisperKit(modelFolderURL: modelFolderURL, tokenizerFolderURL: tokenizerFolderURL)
+    func transcribe(audioURL: URL) async throws -> WhisperTranscriptionResult {
+        try await prepareModel()
+        guard let whisperKit else {
+            throw WhisperEngineError.transcriptionFailed("Whisper model is not initialized.")
+        }
         let audioDuration = try Self.audioDuration(for: audioURL)
         let start = Date()
 
@@ -99,19 +108,15 @@ final class WhisperEngine: WhisperTranscribing {
         config: StreamingConfig,
         stateHandler: @escaping (StreamingState) -> Void
     ) async throws {
-        guard let modelFolderURL else {
-            throw WhisperEngineError.modelMissing
-        }
-        guard let tokenizerFolderURL else {
-            throw WhisperEngineError.tokenizerMissing
-        }
-
         if let existing = streamTranscriber {
             await existing.stop()
             streamTranscriber = nil
         }
 
-        let whisperKit = try await loadWhisperKit(modelFolderURL: modelFolderURL, tokenizerFolderURL: tokenizerFolderURL)
+        try await prepareModel()
+        guard let whisperKit else {
+            throw WhisperEngineError.transcriptionFailed("Whisper model is not initialized.")
+        }
         guard let tokenizer = whisperKit.tokenizer else {
             throw WhisperEngineError.tokenizerMissing
         }
@@ -217,20 +222,31 @@ struct NexaStreamingConfig {
 final class NexaEngine {
     #if canImport(NexaSdk)
     private var asr: Asr?
+    private var fallbackSession: NexaChunkedStreamingSession?
     #else
     private var asr: Any?
     #endif
     private var modelPath: String?
     private let sampleRate = 16_000
 
-    func transcribe(audioURL: URL, modelPath: String) async throws -> WhisperTranscriptionResult {
+    func prepareModel(modelPath: String) async throws {
         let trimmedPath = modelPath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedPath.isEmpty else {
             throw NexaEngineError.modelPathMissing
         }
-
         #if canImport(NexaSdk)
-        let asrInstance = try await loadAsr(modelPath: trimmedPath)
+        _ = try await loadAsr(modelPath: trimmedPath)
+        #else
+        throw NexaEngineError.sdkMissing
+        #endif
+    }
+
+    func transcribe(audioURL: URL, modelPath: String) async throws -> WhisperTranscriptionResult {
+        try await prepareModel(modelPath: modelPath)
+        #if canImport(NexaSdk)
+        guard let asrInstance = asr else {
+            throw NexaEngineError.loadFailed("Nexa model is not initialized.")
+        }
         let start = Date()
         do {
             let response = try await asrInstance.transcribe(options: .init(audioPath: audioURL.path))
@@ -255,25 +271,98 @@ final class NexaEngine {
         config: NexaStreamingConfig,
         onText: @escaping (String) -> Void
     ) async throws {
-        let trimmedPath = modelPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedPath.isEmpty else {
-            throw NexaEngineError.modelPathMissing
-        }
-
         #if canImport(NexaSdk)
-        let asrInstance = try await loadAsr(modelPath: trimmedPath)
+        try await prepareModel(modelPath: modelPath)
+        guard let asrInstance = asr else {
+            throw NexaEngineError.loadFailed("Nexa model is not initialized.")
+        }
+        print(
+            "[NexaEngine] startStreaming language=\(config.language.rawValue) chunk=\(String(format: "%.2f", config.chunkSeconds)) overlap=\(String(format: "%.2f", config.overlapSeconds))"
+        )
         var streamConfig = ASRStreamConfig()
         streamConfig.language = toSdkLanguage(config.language)
         streamConfig.chunkDuration = Float(max(1.0, config.chunkSeconds))
         streamConfig.overlapDuration = Float(max(0.0, min(config.overlapSeconds, config.chunkSeconds - 0.1)))
         streamConfig.sampleRate = Int32(sampleRate)
 
-        do {
+        // Ensure stale stream state is cleared before creating a new stream/session.
+        asrInstance.stopRecordingStream()
+        fallbackSession?.stop()
+        fallbackSession = nil
+
+        actor EmissionState {
+            private(set) var didEmit = false
+            func mark() { didEmit = true }
+        }
+
+        let emissionState = EmissionState()
+
+        let nativeStreamingTask = Task {
             let stream = try asrInstance.startRecordingStream(config: streamConfig)
             for try await text in stream {
-                onText(text)
+                if Task.isCancelled { break }
+                let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !cleaned.isEmpty else { continue }
+                await emissionState.mark()
+                print("[NexaEngine] native streaming chunk (\(cleaned.count) chars)")
+                onText(cleaned)
             }
+        }
+
+        // Native Nexa stream may initialize but never emit. If no text arrives quickly,
+        // switch to a chunked fallback so UI keeps updating.
+        try? await Task.sleep(nanoseconds: 5_000_000_000)
+        if Task.isCancelled {
+            nativeStreamingTask.cancel()
+            asrInstance.stopRecordingStream()
+            fallbackSession?.stop()
+            fallbackSession = nil
+            throw CancellationError()
+        }
+
+        let didEmitNativeText = await emissionState.didEmit
+        if didEmitNativeText {
+            do {
+                try await nativeStreamingTask.value
+                print("[NexaEngine] native streaming ended")
+                return
+            } catch is CancellationError {
+                print("[NexaEngine] native streaming cancelled")
+                throw CancellationError()
+            } catch {
+                throw NexaEngineError.streamingFailed(error.localizedDescription)
+            }
+        }
+
+        print("[NexaEngine] native stream produced no text within 5s, fallback to chunked transcription")
+        nativeStreamingTask.cancel()
+        asrInstance.stopRecordingStream()
+        _ = try? await nativeStreamingTask.value
+
+        let fallback = NexaChunkedStreamingSession(
+            asr: asrInstance,
+            sampleRate: Double(sampleRate),
+            chunkSeconds: config.chunkSeconds,
+            overlapSeconds: config.overlapSeconds,
+            onText: onText
+        )
+
+        do {
+            fallbackSession = fallback
+            try fallback.start()
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 400_000_000)
+            }
+            fallback.stop()
+            fallbackSession = nil
+            throw CancellationError()
+        } catch is CancellationError {
+            fallback.stop()
+            fallbackSession = nil
+            throw CancellationError()
         } catch {
+            fallback.stop()
+            fallbackSession = nil
             throw NexaEngineError.streamingFailed(error.localizedDescription)
         }
         #else
@@ -284,6 +373,8 @@ final class NexaEngine {
     func stopStreaming() {
         #if canImport(NexaSdk)
         asr?.stopRecordingStream()
+        fallbackSession?.stop()
+        fallbackSession = nil
         #endif
     }
 
@@ -319,3 +410,215 @@ final class NexaEngine {
     }
     #endif
 }
+
+#if canImport(NexaSdk)
+private final class NexaChunkedStreamingSession {
+    private let asr: Asr
+    private let sampleRate: Double
+    private let chunkSeconds: Double
+    private let overlapSeconds: Double
+    private let onText: (String) -> Void
+    private let recorder: NexaAudioStreamRecorder
+    private let buffer: NexaAudioSampleBuffer
+    private var task: Task<Void, Never>?
+
+    init(
+        asr: Asr,
+        sampleRate: Double,
+        chunkSeconds: Double,
+        overlapSeconds: Double,
+        onText: @escaping (String) -> Void
+    ) {
+        self.asr = asr
+        self.sampleRate = sampleRate
+        self.chunkSeconds = max(1.0, chunkSeconds)
+        self.overlapSeconds = max(0.0, min(overlapSeconds, chunkSeconds - 0.1))
+        self.onText = onText
+        self.recorder = NexaAudioStreamRecorder(sampleRate: sampleRate)
+        self.buffer = NexaAudioSampleBuffer(sampleRate: sampleRate, maxSeconds: 30)
+    }
+
+    func start() throws {
+        try AudioRecorder.configureSessionForVoiceProcessing()
+        try recorder.start { [weak self] samples in
+            self?.buffer.append(samples)
+        }
+
+        let interval = max(0.6, chunkSeconds - overlapSeconds)
+        task = Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+                let snapshot = self.buffer.snapshotLast(seconds: self.chunkSeconds + self.overlapSeconds)
+                guard !snapshot.isEmpty else { continue }
+                do {
+                    let wavURL = try Self.writeTempWav(samples: snapshot, sampleRate: Int(self.sampleRate))
+                    defer { try? FileManager.default.removeItem(at: wavURL) }
+                    let response = try await self.asr.transcribe(options: .init(audioPath: wavURL.path))
+                    let cleaned = response.asrResult.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !cleaned.isEmpty else { continue }
+                    print("[NexaEngine] fallback chunk (\(cleaned.count) chars)")
+                    Task { @MainActor in
+                        self.onText(cleaned)
+                    }
+                } catch {
+                    print("[NexaEngine] fallback chunk error: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    func stop() {
+        task?.cancel()
+        task = nil
+        recorder.stop()
+        AudioRecorder.deactivateSession()
+    }
+
+    private static func writeTempWav(samples: [Float], sampleRate: Int) throws -> URL {
+        var pcm = [Int16]()
+        pcm.reserveCapacity(samples.count)
+        for sample in samples {
+            let clamped = max(-1.0, min(1.0, sample))
+            pcm.append(Int16((clamped * 32767.0).rounded()))
+        }
+
+        let channels: UInt16 = 1
+        let bitsPerSample: UInt16 = 16
+        let byteRate: UInt32 = UInt32(sampleRate) * UInt32(channels) * UInt32(bitsPerSample / 8)
+        let blockAlign: UInt16 = channels * (bitsPerSample / 8)
+        let dataByteCount = pcm.count * MemoryLayout<Int16>.size
+
+        var wav = Data()
+        wav.append("RIFF".data(using: .ascii)!)
+        appendLE(UInt32(36 + dataByteCount), to: &wav)
+        wav.append("WAVE".data(using: .ascii)!)
+        wav.append("fmt ".data(using: .ascii)!)
+        appendLE(UInt32(16), to: &wav)      // fmt chunk size
+        appendLE(UInt16(1), to: &wav)       // PCM format
+        appendLE(channels, to: &wav)
+        appendLE(UInt32(sampleRate), to: &wav)
+        appendLE(byteRate, to: &wav)
+        appendLE(blockAlign, to: &wav)
+        appendLE(bitsPerSample, to: &wav)
+        wav.append("data".data(using: .ascii)!)
+        appendLE(UInt32(dataByteCount), to: &wav)
+        pcm.withUnsafeBufferPointer { ptr in
+            wav.append(Data(buffer: ptr))
+        }
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nexa_stream_\(UUID().uuidString)")
+            .appendingPathExtension("wav")
+        try wav.write(to: url, options: .atomic)
+        return url
+    }
+
+    private static func appendLE<T: FixedWidthInteger>(_ value: T, to data: inout Data) {
+        var le = value.littleEndian
+        withUnsafeBytes(of: &le) { data.append(contentsOf: $0) }
+    }
+}
+
+private final class NexaAudioSampleBuffer {
+    private var samples: [Float] = []
+    private let sampleRate: Double
+    private let maxSamples: Int
+    private let lock = NSLock()
+
+    init(sampleRate: Double, maxSeconds: Double) {
+        self.sampleRate = sampleRate
+        self.maxSamples = Int(sampleRate * maxSeconds)
+    }
+
+    func append(_ newSamples: [Float]) {
+        guard !newSamples.isEmpty else { return }
+        lock.lock()
+        samples.append(contentsOf: newSamples)
+        if samples.count > maxSamples {
+            samples.removeFirst(samples.count - maxSamples)
+        }
+        lock.unlock()
+    }
+
+    func snapshotLast(seconds: Double) -> [Float] {
+        lock.lock()
+        let count = min(samples.count, Int(sampleRate * seconds))
+        guard count > 0 else {
+            lock.unlock()
+            return []
+        }
+        let result = Array(samples.suffix(count))
+        lock.unlock()
+        return result
+    }
+}
+
+private final class NexaAudioStreamRecorder {
+    private let engine = AVAudioEngine()
+    private let sampleRate: Double
+    private let queue = DispatchQueue(label: "nexa.audio.stream")
+    private var converter: AVAudioConverter?
+    private var outputFormat: AVAudioFormat
+    private var isRunning = false
+
+    init(sampleRate: Double) {
+        self.sampleRate = sampleRate
+        self.outputFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: sampleRate,
+            channels: 1,
+            interleaved: false
+        ) ?? AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
+    }
+
+    func start(onSamples: @escaping ([Float]) -> Void) throws {
+        guard !isRunning else { return }
+        let input = engine.inputNode
+        let inputFormat = input.outputFormat(forBus: 0)
+        converter = AVAudioConverter(from: inputFormat, to: outputFormat)
+
+        input.removeTap(onBus: 0)
+        input.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buffer, _ in
+            guard let self, let converter = self.converter else { return }
+            self.queue.async {
+                let ratio = self.outputFormat.sampleRate / inputFormat.sampleRate
+                let outCapacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 1)
+                guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: self.outputFormat, frameCapacity: outCapacity) else {
+                    return
+                }
+
+                var error: NSError?
+                let inputBlock: AVAudioConverterInputBlock = { _, outStatus in
+                    outStatus.pointee = .haveData
+                    return buffer
+                }
+
+                converter.convert(to: outputBuffer, error: &error, withInputFrom: inputBlock)
+                if error != nil || outputBuffer.frameLength == 0 {
+                    return
+                }
+
+                guard let channelData = outputBuffer.floatChannelData else {
+                    return
+                }
+
+                let count = Int(outputBuffer.frameLength)
+                let samples = Array(UnsafeBufferPointer(start: channelData[0], count: count))
+                onSamples(samples)
+            }
+        }
+
+        engine.prepare()
+        try engine.start()
+        isRunning = true
+    }
+
+    func stop() {
+        guard isRunning else { return }
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        isRunning = false
+    }
+}
+#endif

@@ -1111,6 +1111,13 @@ final class AppViewModel: ObservableObject {
 
             if includeWhisper {
                 do {
+                    await MainActor.run {
+                        self.benchmarkStatus = "Initializing WhisperKit model..."
+                    }
+                    try await whisper.prepareModel()
+                    await MainActor.run {
+                        self.benchmarkStatus = "Benchmarking WhisperKit..."
+                    }
                     let start = Date()
                     let result = try await whisper.transcribe(audioURL: audioURL)
                     let latency = Date().timeIntervalSince(start)
@@ -1132,6 +1139,13 @@ final class AppViewModel: ObservableObject {
                         continue
                     }
                     do {
+                        await MainActor.run {
+                            self.benchmarkStatus = "Initializing \(model.displayName)..."
+                        }
+                        try await nexa.prepareModel(modelPath: url.path)
+                        await MainActor.run {
+                            self.benchmarkStatus = "Benchmarking \(model.displayName)..."
+                        }
                         let start = Date()
                         let result = try await nexa.transcribe(audioURL: audioURL, modelPath: url.path)
                         let latency = Date().timeIntervalSince(start)
@@ -1146,6 +1160,13 @@ final class AppViewModel: ObservableObject {
                 for modelId in runAnywhereModelIds {
                     let modelName = runAnywhereModels.first(where: { $0.id == modelId })?.displayName ?? modelId
                     do {
+                        await MainActor.run {
+                            self.benchmarkStatus = "Initializing \(modelName)..."
+                        }
+                        try await runAnywhere.prepareModel(modelId: modelId)
+                        await MainActor.run {
+                            self.benchmarkStatus = "Benchmarking \(modelName)..."
+                        }
                         let start = Date()
                         let result = try await runAnywhere.transcribe(
                             audioURL: audioURL,
@@ -1208,7 +1229,7 @@ final class AppViewModel: ObservableObject {
         }
 
         isProcessing = true
-        statusText = "Transcribing..."
+        statusText = "Initializing model..."
         logEvent("Transcribing audio: \(audioURL.lastPathComponent)")
 
         if let attributes = try? FileManager.default.attributesOfItem(atPath: audioURL.path),
@@ -1226,6 +1247,34 @@ final class AppViewModel: ObservableObject {
         let runAnywhereDetect = self.runAnywhereDetectLanguage
         Task.detached(priority: .userInitiated) {
             do {
+                let initName: String
+                switch engine {
+                case .whisper:
+                    initName = "WhisperKit"
+                case .nexa:
+                    initName = "NexaSDK"
+                case .runAnywhere:
+                    initName = "RunAnywhere"
+                }
+                await MainActor.run {
+                    self.statusText = "Initializing \(initName) model..."
+                    self.logEvent("\(initName) model initialization started", showToast: false)
+                }
+
+                switch engine {
+                case .whisper:
+                    try await whisper.prepareModel()
+                case .nexa:
+                    try await nexa.prepareModel(modelPath: nexaPath)
+                case .runAnywhere:
+                    try await runAnywhere.prepareModel(modelId: runAnywhereModelId)
+                }
+
+                await MainActor.run {
+                    self.statusText = "Transcribing..."
+                    self.logEvent("\(initName) model initialization completed", showToast: false)
+                }
+
                 let result: WhisperTranscriptionResult
                 switch engine {
                 case .whisper:
@@ -1286,7 +1335,7 @@ final class AppViewModel: ObservableObject {
         sttText = ""
         lastStreamingText = ""
         isStreaming = true
-        statusText = "Streaming..."
+        statusText = "Initializing WhisperKit model..."
         logEvent("Streaming started")
 
         let config = StreamingConfig(
@@ -1307,6 +1356,25 @@ final class AppViewModel: ObservableObject {
                     self.statusText = "Permission denied"
                     self.isStreaming = false
                     self.logEvent("Microphone permission denied")
+                }
+                return
+            }
+            await MainActor.run {
+                self.statusText = "Initializing WhisperKit model..."
+                self.logEvent("WhisperKit model initialization started", showToast: false)
+            }
+            do {
+                try await self.whisper.prepareModel()
+                await MainActor.run {
+                    self.statusText = "Starting stream..."
+                    self.logEvent("WhisperKit model initialization completed", showToast: false)
+                }
+            } catch {
+                await MainActor.run {
+                    self.errorMessage = error.localizedDescription
+                    self.statusText = "Error"
+                    self.isStreaming = false
+                    self.logEvent("Whisper model init error: \(error.localizedDescription)")
                 }
                 return
             }
@@ -1368,7 +1436,7 @@ final class AppViewModel: ObservableObject {
         sttText = ""
         lastStreamingText = ""
         isStreaming = true
-        statusText = "Streaming..."
+        statusText = "Initializing Nexa model..."
         logEvent("Nexa streaming started")
 
         let config = NexaStreamingConfig(
@@ -1388,42 +1456,36 @@ final class AppViewModel: ObservableObject {
         }
 
         nexaStreamingTask?.cancel()
-        nexaStreamingTask = Task.detached(priority: .userInitiated) { [weak self] in
+        nexaStreamingTask = Task(priority: .userInitiated) { [weak self] in
             guard let self else { return }
             let granted = await AudioProcessor.requestRecordPermission()
             guard granted else {
-                await MainActor.run {
-                    self.errorMessage = "Microphone permission denied. Enable it in Settings."
-                    self.statusText = "Permission denied"
-                    self.isStreaming = false
-                    self.logEvent("Microphone permission denied")
-                }
+                self.errorMessage = "Microphone permission denied. Enable it in Settings."
+                self.statusText = "Permission denied"
+                self.isStreaming = false
+                self.logEvent("Microphone permission denied")
                 return
             }
+
+            self.logEvent("Nexa streaming microphone granted", showToast: false)
             do {
-                try AudioRecorder.configureSessionForVoiceProcessing()
-            } catch {
-                await MainActor.run {
-                    self.errorMessage = error.localizedDescription
-                    self.statusText = "Audio session error"
-                    self.isStreaming = false
-                    self.logEvent("Audio session error: \(error.localizedDescription)")
-                }
-                return
-            }
-            do {
+                self.statusText = "Initializing Nexa model..."
+                self.logEvent("Nexa model initialization started", showToast: false)
+                try await nexa.prepareModel(modelPath: nexaPath)
+                self.statusText = "Starting stream..."
+                self.logEvent("Nexa model initialization completed", showToast: false)
                 try await nexa.startStreaming(modelPath: nexaPath, config: config) { text in
                     Task { @MainActor in
                         self.updateChunkedStreamingText(text)
                     }
                 }
+            } catch is CancellationError {
+                self.logEvent("Nexa streaming cancelled", showToast: false)
             } catch {
-                await MainActor.run {
-                    self.errorMessage = error.localizedDescription
-                    self.statusText = "Error"
-                    self.isStreaming = false
-                    self.logEvent("Nexa streaming error: \(error.localizedDescription)")
-                }
+                self.errorMessage = error.localizedDescription
+                self.statusText = "Error"
+                self.isStreaming = false
+                self.logEvent("Nexa streaming error: \(error.localizedDescription)")
             }
         }
     }
@@ -1446,7 +1508,7 @@ final class AppViewModel: ObservableObject {
         sttText = ""
         lastStreamingText = ""
         isStreaming = true
-        statusText = "Streaming..."
+        statusText = "Initializing RunAnywhere model..."
         logEvent("RunAnywhere streaming started")
         runAnywhereStreamingSession?.stop()
         runAnywhereStreamingSession = nil
@@ -1478,6 +1540,15 @@ final class AppViewModel: ObservableObject {
                 return
             }
             do {
+                await MainActor.run {
+                    self.statusText = "Initializing RunAnywhere model..."
+                    self.logEvent("RunAnywhere model initialization started", showToast: false)
+                }
+                try await self.runAnywhere.prepareModel(modelId: modelId)
+                await MainActor.run {
+                    self.statusText = "Starting stream..."
+                    self.logEvent("RunAnywhere model initialization completed", showToast: false)
+                }
                 let session = try await self.runAnywhere.startChunkedStreaming(
                     modelId: modelId,
                     language: language.isEmpty ? "auto" : language,

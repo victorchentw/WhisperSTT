@@ -32,18 +32,21 @@ final class RunAnywhereEngine {
     // Bump this when bundled RunAnywhere model layout/selection logic changes.
     private let bundledModelSyncVersion = "runanywhere-ios-v4"
 
+    func prepareModel(modelId: String) async throws {
+        guard !modelId.isEmpty else {
+            throw RunAnywhereEngineError.modelIdMissing
+        }
+        try await ensureInitialized()
+        try await loadModelIfNeeded(modelId)
+    }
+
     func transcribe(
         audioURL: URL,
         modelId: String,
         language: String,
         detectLanguage: Bool
     ) async throws -> WhisperTranscriptionResult {
-        guard !modelId.isEmpty else {
-            throw RunAnywhereEngineError.modelIdMissing
-        }
-
-        try await ensureInitialized()
-        try await loadModelIfNeeded(modelId)
+        try await prepareModel(modelId: modelId)
 
         let (audioData, duration) = try Self.loadAudioData(from: audioURL, sampleRate: sampleRate)
         let normalizedLanguage = Self.normalizedLanguageCode(
@@ -141,12 +144,7 @@ final class RunAnywhereEngine {
         overlapSeconds: Double,
         onText: @escaping (String) -> Void
     ) async throws -> RunAnywhereStreamingSession {
-        guard !modelId.isEmpty else {
-            throw RunAnywhereEngineError.modelIdMissing
-        }
-
-        try await ensureInitialized()
-        try await loadModelIfNeeded(modelId)
+        try await prepareModel(modelId: modelId)
 
         let normalizedLanguage = Self.normalizedLanguageCode(
             language,
