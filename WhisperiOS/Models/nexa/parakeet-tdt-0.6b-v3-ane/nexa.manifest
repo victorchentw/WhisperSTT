@@ -1,6 +1,0 @@
-{
-    "ModelName": "parakeet",
-    "ModelType": "asr",
-    "PluginId": "ane",
-    "MinSDKVersion": "v0.2.30-rc2"
-}

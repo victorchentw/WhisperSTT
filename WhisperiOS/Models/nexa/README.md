@@ -1,21 +1,15 @@
 Nexa bundled models
 
-This app expects Nexa ASR model folders under:
-  WhisperiOS/Models/nexa/<model-id>/
+Model binaries are not committed to git.
 
-Official STT model (per Nexa iOS docs):
+To download the default Nexa STT model used by this app:
+
+1) From repo root, run:
+   ./scripts/bootstrap_ios_models.sh
+2) Rebuild the app.
+
+The script downloads:
   - NexaAI/parakeet-tdt-0.6b-v3-ane
 
-Current repo status:
-  - Default model is already bundled at:
-    WhisperiOS/Models/nexa/parakeet-tdt-0.6b-v3-ane
-  - App bundle resource path at runtime is:
-    <App>.app/nexa/parakeet-tdt-0.6b-v3-ane
-
-Refresh workflow (if you need to re-download):
-  1) Remove the existing parakeet folder.
-  2) Download files from:
-       https://huggingface.co/NexaAI/parakeet-tdt-0.6b-v3-ane
-  3) Put files under:
-       WhisperiOS/Models/nexa/parakeet-tdt-0.6b-v3-ane
-  4) Rebuild the app.
+Target folder:
+  - WhisperiOS/Models/nexa/parakeet-tdt-0.6b-v3-ane

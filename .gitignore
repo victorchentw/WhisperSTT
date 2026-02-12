@@ -28,3 +28,19 @@ whisper/
 
 # Large model archives
 WhisperAndroid/app/src/main/assets/models/whisper/tiny/*.tar.bz2
+
+# iOS AI model artifacts (download locally via scripts/bootstrap_ios_models.sh)
+WhisperiOS/Models/nexa/parakeet-tdt-0.6b-v3-ane/**
+!WhisperiOS/Models/nexa/parakeet-tdt-0.6b-v3-ane/.keep
+
+WhisperiOS/Models/runanywhere/whisper-tiny-onnx/**
+!WhisperiOS/Models/runanywhere/whisper-tiny-onnx/.keep
+
+WhisperiOS/Models/runanywhere/whisper-base-onnx/**
+!WhisperiOS/Models/runanywhere/whisper-base-onnx/.keep
+
+WhisperiOS/Models/whisperkit-coreml/openai_whisper-tiny/**
+!WhisperiOS/Models/whisperkit-coreml/openai_whisper-tiny/.keep
+
+WhisperiOS/Models/tokenizers/openai-whisper-tiny/**
+!WhisperiOS/Models/tokenizers/openai-whisper-tiny/.keep
