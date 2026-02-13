@@ -29,7 +29,7 @@ protocol WhisperTranscribing {
     func transcribe(audioURL: URL) async throws -> WhisperTranscriptionResult
 }
 
-final class WhisperEngine: WhisperTranscribing {
+final class WhisperKitEngine: WhisperTranscribing {
     private var whisperKit: WhisperKit?
     private var streamTranscriber: StreamingTranscriber?
     private let modelFolderURL: URL?
@@ -196,7 +196,7 @@ final class WhisperEngine: WhisperTranscribing {
     }
 }
 
-extension WhisperEngine: STTStreamingEngine {
+extension WhisperKitEngine: STTStreamingEngine {
     var displayName: String {
         "WhisperKit"
     }

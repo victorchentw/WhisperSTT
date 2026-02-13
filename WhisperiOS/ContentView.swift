@@ -749,7 +749,7 @@ final class AppViewModel: ObservableObject {
     @Published var benchmarkResults: [BenchmarkResult] = []
 
     private let recorder = AudioRecorder()
-    private let whisper = WhisperEngine()
+    private let whisper = WhisperKitEngine()
     private let nexa = NexaEngine()
     private let runAnywhere = RunAnywhereEngine()
     private let tts = TTSService()
