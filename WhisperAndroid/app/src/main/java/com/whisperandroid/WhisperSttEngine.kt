@@ -12,25 +12,62 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 class WhisperSttEngine(private val context: Context) {
-    private val tag = "WhisperAndroid"
+    private val tag = "WhisperEngine"
     private val decodeMutex = Mutex()
+
     @Volatile
     private var recognizer: OfflineRecognizer? = null
     @Volatile
-    private var currentLanguage: String = ""
+    private var currentLanguage = ""
+    @Volatile
+    private var currentModelAssetPath = SherpaOnnxModelCatalog.models.first().assetFolderOrFile
 
     private fun normalizeLanguage(language: String): String {
         val code = language.trim().lowercase()
         if (code.isEmpty() || code == "auto") return ""
-        val normalized = code.replace('_', '-')
-        return normalized.substringBefore('-')
+        return code.replace('_', '-').substringBefore('-')
     }
 
-    private fun buildRecognizer(language: String): OfflineRecognizer {
+    suspend fun prepare(modelAssetPath: String, language: String) {
+        val normalizedLanguage = normalizeLanguage(language)
+        decodeMutex.withLock {
+            if (recognizer != null &&
+                currentLanguage == normalizedLanguage &&
+                currentModelAssetPath == modelAssetPath) {
+                return
+            }
+            recognizer?.release()
+            recognizer = buildRecognizer(modelAssetPath, normalizedLanguage)
+            currentLanguage = normalizedLanguage
+            currentModelAssetPath = modelAssetPath
+        }
+    }
+
+    private fun buildRecognizer(modelAssetPath: String, language: String): OfflineRecognizer {
+        val encoderPath = resolveAssetPath(
+            listOf(
+                "$modelAssetPath/tiny-encoder.onnx",
+                "$modelAssetPath/encoder.onnx",
+                "$modelAssetPath/tiny-encoder.int8.onnx"
+            )
+        )
+        val decoderPath = resolveAssetPath(
+            listOf(
+                "$modelAssetPath/tiny-decoder.onnx",
+                "$modelAssetPath/decoder.onnx",
+                "$modelAssetPath/tiny-decoder.int8.onnx"
+            )
+        )
+        val tokensPath = resolveAssetPath(
+            listOf(
+                "$modelAssetPath/tiny-tokens.txt",
+                "$modelAssetPath/tokens.txt"
+            )
+        )
+
         val whisper = OfflineWhisperModelConfig().apply {
-            encoder = "models/whisper/tiny/tiny-encoder.onnx"
-            decoder = "models/whisper/tiny/tiny-decoder.onnx"
-            // sherpa-onnx Whisper expects a concrete language code or empty string for auto.
+            encoder = encoderPath
+            decoder = decoderPath
             this.language = language
             task = "transcribe"
             tailPaddings = -1
@@ -38,7 +75,7 @@ class WhisperSttEngine(private val context: Context) {
 
         val modelConfig = OfflineModelConfig().apply {
             this.whisper = whisper
-            tokens = "models/whisper/tiny/tiny-tokens.txt"
+            tokens = tokensPath
             modelType = "whisper"
             numThreads = Runtime.getRuntime().availableProcessors().coerceAtMost(4)
             debug = false
@@ -59,19 +96,48 @@ class WhisperSttEngine(private val context: Context) {
             blankPenalty = 0.0f
         }
 
-        val displayLanguage = if (language.isEmpty()) "auto" else language
-        Log.d(tag, "Initializing OfflineRecognizer (Whisper tiny, multilingual, language=$displayLanguage)")
+        val displayLanguage = if (language.isBlank()) "auto" else language
+        Log.d(tag, "Initializing OfflineRecognizer (language=$displayLanguage, model=$modelAssetPath)")
         return OfflineRecognizer(context.assets, config)
     }
 
-    suspend fun transcribe(samples: FloatArray, sampleRate: Int, language: String): String = decodeMutex.withLock {
+    private fun resolveAssetPath(candidates: List<String>): String {
+        for (candidate in candidates) {
+            if (assetExists(candidate)) {
+                return candidate
+            }
+        }
+        throw IllegalStateException(
+            "Sherpa-ONNX model files are missing in Android assets. " +
+                "Run ./scripts/bootstrap_android_models.sh and rebuild."
+        )
+    }
+
+    private fun assetExists(path: String): Boolean {
+        return try {
+            context.assets.open(path).close()
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    suspend fun transcribe(
+        samples: FloatArray,
+        sampleRate: Int,
+        language: String,
+        modelAssetPath: String = SherpaOnnxModelCatalog.models.first().assetFolderOrFile
+    ): String = decodeMutex.withLock {
         if (samples.isEmpty()) return ""
         val normalizedLanguage = normalizeLanguage(language)
-        val rec = if (recognizer == null || currentLanguage != normalizedLanguage) {
+        val rec = if (recognizer == null ||
+            currentLanguage != normalizedLanguage ||
+            currentModelAssetPath != modelAssetPath) {
             recognizer?.release()
-            buildRecognizer(normalizedLanguage).also {
+            buildRecognizer(modelAssetPath, normalizedLanguage).also {
                 recognizer = it
                 currentLanguage = normalizedLanguage
+                currentModelAssetPath = modelAssetPath
             }
         } else {
             recognizer!!
@@ -90,5 +156,6 @@ class WhisperSttEngine(private val context: Context) {
     fun close() {
         recognizer?.release()
         recognizer = null
+        currentLanguage = ""
     }
 }

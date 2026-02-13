@@ -18,171 +18,295 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.min
 
-enum class MainMode { STT, TTS }
+private data class EngineTranscription(
+    val text: String,
+    val latencyMs: Long,
+    val audioSec: Double,
+    val usedNativeStreaming: Boolean = false,
+    val usedChunkFallback: Boolean = false
+)
 
-enum class SttMode { STREAMING, CLIP }
+private data class ChunkConfig(
+    val chunkSeconds: Float,
+    val overlapSeconds: Float
+)
 
-data class PerformanceStats(
-    val lastLatencyMs: Long = 0,
-    val avgLatencyMs: Long = 0,
-    val lastAudioSec: Float = 0f,
-    val lastRtf: Float = 0f,
-    val avgRtf: Float = 0f
+private data class LanguageHint(
+    val language: String,
+    val detectLanguage: Boolean
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val tag = "WhisperAndroid"
-    private val sttEngine = WhisperSttEngine(application)
+    private val appContext = application.applicationContext
+
+    private val sherpaEngine = WhisperSttEngine(appContext)
+    private val nexaEngine = NexaSttEngine(appContext)
+    private val runAnywhereEngine = RunAnywhereSttEngine(appContext)
 
     private val sampleRate = 16000
     private val channelConfig = AudioFormat.CHANNEL_IN_MONO
     private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
+    private val languageOptions = listOf("auto", "en", "zh", "ja", "ko", "fr", "de", "es")
 
-    private val supportedLanguages = listOf("auto", "en", "zh", "ja", "ko", "fr", "de", "es")
+    private val _uiState = MutableStateFlow(AppUiState())
+    val uiState: StateFlow<AppUiState> = _uiState.asStateFlow()
 
-    private val _mode = MutableStateFlow(MainMode.STT)
-    val mode: StateFlow<MainMode> = _mode
+    val toastFlow = MutableSharedFlow<String>(extraBufferCapacity = 32)
 
-    private val _sttMode = MutableStateFlow(SttMode.CLIP)
-    val sttMode: StateFlow<SttMode> = _sttMode
-
-    private val _status = MutableStateFlow("Idle")
-    val status: StateFlow<String> = _status
-
-    private val _isListening = MutableStateFlow(false)
-    val isListening: StateFlow<Boolean> = _isListening
-
-    private val _transcription = MutableStateFlow("")
-    val transcription: StateFlow<String> = _transcription
-
-    private val _language = MutableStateFlow(resolveDefaultLanguage())
-    val language: StateFlow<String> = _language
-    val languageOptions: List<String> = supportedLanguages
-
-    private val _performance = MutableStateFlow(PerformanceStats())
-    val performance: StateFlow<PerformanceStats> = _performance
-
-    private val _ttsText = MutableStateFlow("")
-    val ttsText: StateFlow<String> = _ttsText
-
-    private val _isSpeaking = MutableStateFlow(false)
-    val isSpeaking: StateFlow<Boolean> = _isSpeaking
-
-    private val _ttsReady = MutableStateFlow(false)
-    val ttsReady: StateFlow<Boolean> = _ttsReady
-
-    val toastFlow = MutableSharedFlow<String>(extraBufferCapacity = 1)
-
-    private var tts: TextToSpeech? = null
     private var audioRecord: AudioRecord? = null
     private var recordJob: Job? = null
     private var decodeJob: Job? = null
+
+    private val clipChunks = mutableListOf<FloatArray>()
+    private val streamFullChunks = mutableListOf<FloatArray>()
+
+    private val streamWindowLock = Any()
+    private val streamWindowChunks = ArrayDeque<FloatArray>()
+    private var streamWindowSamples = 0
+
     private var noiseSuppressor: NoiseSuppressor? = null
     private var echoCanceler: AcousticEchoCanceler? = null
     private var agc: AutomaticGainControl? = null
 
-    private val clipChunks = mutableListOf<ShortArray>()
-    private val clipChunkSizes = mutableListOf<Int>()
-
-    private val streamWindowChunks = ArrayDeque<FloatArray>()
-    private var streamWindowSamples = 0
-    private val streamWindowLock = Any()
-
-    private val streamFullChunks = mutableListOf<FloatArray>()
-
     private var totalLatencyMs = 0L
-    private var totalRtf = 0f
+    private var totalRtf = 0.0
     private var statsCount = 0
 
-    private val streamSegmentSeconds = 4.0f
-    private val streamOverlapSeconds = 1.0f
+    private var modelReadyKey: String? = null
+    private var runAnywhereFallbackNoticeShown = false
 
-    fun setMode(newMode: MainMode) {
-        _mode.value = newMode
+    private var tts: TextToSpeech? = null
+
+    fun getLanguageOptions(): List<String> = languageOptions
+
+    fun setMode(mode: AppMode) {
+        updateUi { it.copy(mode = mode) }
     }
 
-    fun setSttMode(newMode: SttMode) {
-        _sttMode.value = newMode
+    fun setSttMode(mode: SttMode) {
+        updateUi { it.copy(sttMode = mode) }
     }
 
-    fun updateTtsText(text: String) {
-        _ttsText.value = text
+    fun setSttEngine(engine: SttEngineType) {
+        updateUi {
+            it.copy(
+                sttEngine = engine,
+                status = "Switched to ${engine.displayName}"
+            )
+        }
+        invalidateModelInit("Model not initialized")
     }
 
-    fun setLanguage(code: String) {
-        _language.value = code
+    fun setLanguage(language: String) {
+        updateUi {
+            it.copy(
+                language = language,
+                detectLanguage = if (language == "auto") true else it.detectLanguage
+            )
+        }
+        invalidateModelInit("Language changed")
+    }
+
+    fun setDetectLanguage(enabled: Boolean) {
+        updateUi { it.copy(detectLanguage = enabled) }
+    }
+
+    fun setSherpaModel(modelId: String) {
+        updateUi { it.copy(sherpaModelId = modelId) }
+        invalidateModelInit("Sherpa-ONNX model changed")
+    }
+
+    fun setNexaModel(modelId: String) {
+        updateUi { it.copy(nexaModelId = modelId) }
+        invalidateModelInit("Nexa model changed")
+    }
+
+    fun setRunAnywhereModel(modelId: String) {
+        updateUi { it.copy(runAnywhereModelId = modelId) }
+        invalidateModelInit("RunAnywhere model changed")
+    }
+
+    fun setNexaChunkSeconds(value: Float) {
+        val sanitized = value.coerceIn(1.0f, 12.0f)
+        updateUi {
+            it.copy(
+                nexaChunkSeconds = sanitized,
+                nexaOverlapSeconds = it.nexaOverlapSeconds.coerceIn(0.0f, (sanitized - 0.1f).coerceAtLeast(0.0f))
+            )
+        }
+    }
+
+    fun setNexaOverlapSeconds(value: Float) {
+        val currentChunk = _uiState.value.nexaChunkSeconds
+        val sanitized = value.coerceIn(0.0f, (currentChunk - 0.1f).coerceAtLeast(0.0f))
+        updateUi { it.copy(nexaOverlapSeconds = sanitized) }
+    }
+
+    fun setRunAnywhereChunkSeconds(value: Float) {
+        val sanitized = value.coerceIn(1.0f, 12.0f)
+        updateUi {
+            it.copy(
+                runAnywhereChunkSeconds = sanitized,
+                runAnywhereOverlapSeconds = it.runAnywhereOverlapSeconds.coerceIn(0.0f, (sanitized - 0.1f).coerceAtLeast(0.0f))
+            )
+        }
+    }
+
+    fun setRunAnywhereOverlapSeconds(value: Float) {
+        val currentChunk = _uiState.value.runAnywhereChunkSeconds
+        val sanitized = value.coerceIn(0.0f, (currentChunk - 0.1f).coerceAtLeast(0.0f))
+        updateUi { it.copy(runAnywhereOverlapSeconds = sanitized) }
+    }
+
+    fun initializeSelectedModel() {
+        viewModelScope.launch(Dispatchers.Default) {
+            ensureSelectedModelInitialized(force = true)
+        }
     }
 
     fun startClip() {
-        if (_isListening.value) return
-        clipChunks.clear()
-        clipChunkSizes.clear()
-        _isListening.value = true
-        _status.value = "Listening (clip)"
-        log("Start clip recording", true)
+        if (_uiState.value.isListening) return
+        viewModelScope.launch(Dispatchers.Default) {
+            if (!ensureSelectedModelInitialized()) return@launch
 
-        startRecording { buffer, read ->
-            if (read > 0) {
-                clipChunks.add(buffer.copyOf(read))
-                clipChunkSizes.add(read)
+            clipChunks.clear()
+            updateUi {
+                it.copy(
+                    isListening = true,
+                    status = "Listening (clip)",
+                    transcription = ""
+                )
+            }
+            log("Start clip recording", toast = true)
+
+            startRecording { chunk ->
+                if (chunk.isNotEmpty()) {
+                    synchronized(clipChunks) {
+                        clipChunks.add(chunk)
+                    }
+                }
             }
         }
     }
 
     fun stopClipAndTranscribe() {
-        if (!_isListening.value) return
+        if (!_uiState.value.isListening) return
         stopRecording()
-        _isListening.value = false
-        _status.value = "Transcribing (clip)"
-        log("Stop clip recording, transcribing", true)
 
-        val samples = flattenShortChunks(clipChunks, clipChunkSizes)
+        updateUi {
+            it.copy(
+                isListening = false,
+                isProcessing = true,
+                status = "Transcribing (clip)"
+            )
+        }
+
+        val samples = synchronized(clipChunks) {
+            flattenFloatChunks(clipChunks.toList()).also { clipChunks.clear() }
+        }
+
         if (samples.isEmpty()) {
-            _status.value = "Idle"
-            log("No audio captured")
+            updateUi {
+                it.copy(
+                    isProcessing = false,
+                    status = "Idle"
+                )
+            }
+            log("No audio captured", toast = true)
             return
         }
 
         decodeJob?.cancel()
         decodeJob = viewModelScope.launch(Dispatchers.Default) {
-            val (text, latencyMs, audioSec) = transcribeWithStats(samples)
-            _transcription.value = text
-            updatePerformance(latencyMs, audioSec)
-            _status.value = "Idle"
-            log("Transcription finished (${latencyMs} ms)")
+            val result = runCatching {
+                transcribeWithSelectedEngine(samples, isStreamingChunk = false)
+            }
+            result.onSuccess { output ->
+                applyTranscriptionResult(output, replaceText = true)
+                updateUi {
+                    it.copy(
+                        isProcessing = false,
+                        status = "Idle"
+                    )
+                }
+            }.onFailure { error ->
+                updateUi {
+                    it.copy(
+                        isProcessing = false,
+                        status = "Error: ${error.message ?: "unknown"}"
+                    )
+                }
+                log("Clip transcription failed: ${error.message}", toast = true)
+            }
         }
     }
 
     fun startStreaming() {
-        if (_isListening.value) return
-        _isListening.value = true
-        _status.value = "Listening (streaming)"
-        _transcription.value = ""
-        log("Start streaming", true)
+        if (_uiState.value.isListening) return
 
-        synchronized(streamWindowLock) {
-            streamWindowChunks.clear()
-            streamWindowSamples = 0
-        }
-        streamFullChunks.clear()
+        viewModelScope.launch(Dispatchers.Default) {
+            if (!ensureSelectedModelInitialized()) return@launch
 
-        startRecording { buffer, read ->
-            if (read <= 0) return@startRecording
-            val floatChunk = toFloatArray(buffer, read)
-            streamFullChunks.add(floatChunk)
-            appendStreamWindow(floatChunk)
+            synchronized(streamWindowLock) {
+                streamWindowChunks.clear()
+                streamWindowSamples = 0
+            }
+            streamFullChunks.clear()
+            runAnywhereFallbackNoticeShown = false
 
-            val windowSamples = (streamSegmentSeconds * sampleRate).toInt()
-            if (currentWindowSamples() >= windowSamples) {
+            updateUi {
+                it.copy(
+                    isListening = true,
+                    status = "Listening (streaming)",
+                    transcription = ""
+                )
+            }
+            log("Start streaming", toast = true)
+            if (_uiState.value.sttEngine == SttEngineType.NEXA) {
+                log("Nexa streaming uses chunked fallback mode")
+            }
+
+            startRecording { chunk ->
+                if (chunk.isEmpty()) return@startRecording
+                streamFullChunks.add(chunk)
+                appendStreamWindow(chunk)
+
+                val stateSnapshot = _uiState.value
+                val cfg = chunkConfig(stateSnapshot)
+                val chunkSamples = (cfg.chunkSeconds * sampleRate).toInt().coerceAtLeast(sampleRate)
+                if (currentWindowSamples() < chunkSamples) return@startRecording
+                if (decodeJob?.isActive == true) return@startRecording
+
                 val snapshot = snapshotStreamWindow()
-                if (snapshot.isNotEmpty()) {
-                    val scheduled = decodeStreamingSnapshot(snapshot)
-                    if (scheduled) {
-                        trimStreamWindow((streamOverlapSeconds * sampleRate).toInt())
+                if (snapshot.isEmpty()) return@startRecording
+                trimStreamWindow((cfg.overlapSeconds * sampleRate).toInt())
+
+                decodeJob = viewModelScope.launch(Dispatchers.Default) {
+                    val partial = runCatching {
+                        transcribeWithSelectedEngine(snapshot, isStreamingChunk = true)
+                    }
+                    partial.onSuccess { output ->
+                        applyTranscriptionResult(output, replaceText = false)
+                        val merged = mergeStreamingText(_uiState.value.transcription, output.text)
+                        updateUi {
+                            it.copy(
+                                transcription = merged,
+                                status = "Listening (streaming)"
+                            )
+                        }
+                        if (output.usedChunkFallback && !runAnywhereFallbackNoticeShown) {
+                            runAnywhereFallbackNoticeShown = true
+                            log("Native streaming unavailable, switched to chunk fallback", toast = true)
+                        }
+                    }.onFailure { error ->
+                        log("Streaming chunk failed: ${error.message}")
                     }
                 }
             }
@@ -190,146 +314,640 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun stopStreaming() {
-        if (!_isListening.value) return
+        if (!_uiState.value.isListening) return
         stopRecording()
-        _isListening.value = false
-        _status.value = "Transcribing (final)"
-        log("Stop streaming, final transcription", true)
 
-        val samples = flattenFloatChunks(streamFullChunks)
-        if (samples.isEmpty()) {
-            _status.value = "Idle"
+        updateUi {
+            it.copy(
+                isListening = false,
+                isProcessing = true,
+                status = "Transcribing final result"
+            )
+        }
+
+        val finalSamples = flattenFloatChunks(streamFullChunks)
+        streamFullChunks.clear()
+
+        if (finalSamples.isEmpty()) {
+            updateUi {
+                it.copy(
+                    isProcessing = false,
+                    status = "Idle"
+                )
+            }
             return
         }
 
         decodeJob?.cancel()
         decodeJob = viewModelScope.launch(Dispatchers.Default) {
-            val (text, latencyMs, audioSec) = transcribeWithStats(samples)
-            _transcription.value = text
-            updatePerformance(latencyMs, audioSec)
-            _status.value = "Idle"
-            log("Final transcription finished (${latencyMs} ms)")
-        }
-    }
-
-    private fun decodeStreamingSnapshot(snapshot: FloatArray): Boolean {
-        if (decodeJob?.isActive == true) return false
-        decodeJob = viewModelScope.launch(Dispatchers.Default) {
-            val (text, latencyMs, audioSec) = transcribeWithStats(snapshot)
-            _transcription.value = mergeStreamingText(_transcription.value, text)
-            updatePerformance(latencyMs, audioSec)
-        }
-        return true
-    }
-
-    fun startSpeaking() {
-        val text = _ttsText.value.trim()
-        if (text.isEmpty()) {
-            log("TTS text is empty", true)
-            return
-        }
-        ensureTts()
-        if (_ttsReady.value.not()) {
-            log("TTS not ready", true)
-            return
-        }
-        _status.value = "Speaking"
-        log("TTS speak", true)
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "utterance")
-    }
-
-    fun stopSpeaking() {
-        tts?.stop()
-        _isSpeaking.value = false
-        _status.value = "Idle"
-        log("TTS stop")
-    }
-
-    private fun ensureTts() {
-        if (tts != null) return
-        tts = TextToSpeech(getApplication()) { status ->
-            val ready = status == TextToSpeech.SUCCESS
-            _ttsReady.value = ready
-            if (ready) {
-                tts?.language = Locale.getDefault()
-                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                    override fun onStart(utteranceId: String?) {
-                        _isSpeaking.value = true
-                    }
-
-                    override fun onDone(utteranceId: String?) {
-                        _isSpeaking.value = false
-                        _status.value = "Idle"
-                    }
-
-                    override fun onError(utteranceId: String?) {
-                        _isSpeaking.value = false
-                        _status.value = "Idle"
-                        log("TTS error", true)
-                    }
-                })
-            } else {
-                log("TTS init failed", true)
+            val result = runCatching {
+                transcribeWithSelectedEngine(finalSamples, isStreamingChunk = false)
+            }
+            result.onSuccess { output ->
+                applyTranscriptionResult(output, replaceText = true)
+                updateUi {
+                    it.copy(
+                        isProcessing = false,
+                        status = "Idle"
+                    )
+                }
+            }.onFailure { error ->
+                updateUi {
+                    it.copy(
+                        isProcessing = false,
+                        status = "Error: ${error.message ?: "unknown"}"
+                    )
+                }
+                log("Final transcription failed: ${error.message}", toast = true)
             }
         }
     }
 
-    private fun startRecording(onPcm: (ShortArray, Int) -> Unit) {
-        recordJob?.cancel()
-        val minBuffer = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
-            .coerceAtLeast(sampleRate)
-        val record = createAudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, minBuffer)
-            ?: createAudioRecord(MediaRecorder.AudioSource.MIC, minBuffer)
-        if (record == null) {
-            log("AudioRecord init failed", true)
-            _isListening.value = false
+    fun updateTtsText(text: String) {
+        updateUi { it.copy(ttsText = text) }
+    }
+
+    fun startSpeaking() {
+        val text = _uiState.value.ttsText.trim()
+        if (text.isEmpty()) {
+            log("TTS text is empty", toast = true)
             return
         }
+        ensureTts()
+        if (!_uiState.value.ttsReady) {
+            log("TTS is not ready", toast = true)
+            return
+        }
+        updateUi { it.copy(status = "Speaking") }
+        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "whisperandroid_tts")
+    }
+
+    fun stopSpeaking() {
+        tts?.stop()
+        updateUi {
+            it.copy(
+                isSpeaking = false,
+                status = "Idle"
+            )
+        }
+    }
+
+    fun setBenchmarkClip(clipId: String) {
+        updateUi {
+            it.copy(
+                benchmarkClipId = clipId,
+                benchmarkTranscriptId = clipId,
+                benchmarkStatus = "Ready"
+            )
+        }
+    }
+
+    fun toggleBenchmarkIncludeSherpa() {
+        updateUi { it.copy(benchmarkIncludeSherpa = !it.benchmarkIncludeSherpa) }
+    }
+
+    fun toggleBenchmarkIncludeNexa() {
+        updateUi { it.copy(benchmarkIncludeNexa = !it.benchmarkIncludeNexa) }
+    }
+
+    fun toggleBenchmarkIncludeRunAnywhere() {
+        updateUi { it.copy(benchmarkIncludeRunAnywhere = !it.benchmarkIncludeRunAnywhere) }
+    }
+
+    fun toggleBenchmarkNexaModel(modelId: String) {
+        updateUi {
+            val next = it.benchmarkNexaModelIds.toMutableSet()
+            if (!next.add(modelId)) {
+                next.remove(modelId)
+            }
+            it.copy(benchmarkNexaModelIds = next)
+        }
+    }
+
+    fun toggleBenchmarkRunAnywhereModel(modelId: String) {
+        updateUi {
+            val next = it.benchmarkRunAnywhereModelIds.toMutableSet()
+            if (!next.add(modelId)) {
+                next.remove(modelId)
+            }
+            it.copy(benchmarkRunAnywhereModelIds = next)
+        }
+    }
+
+    fun runBenchmark() {
+        val state = _uiState.value
+        if (state.benchmarkRunning) return
+
+        viewModelScope.launch(Dispatchers.Default) {
+            val clip = BenchmarkClipCatalog.clips.find { it.id == _uiState.value.benchmarkClipId }
+            if (clip == null) {
+                updateUi { it.copy(benchmarkStatus = "Clip not found") }
+                return@launch
+            }
+
+            updateUi {
+                it.copy(
+                    benchmarkRunning = true,
+                    benchmarkStatus = "Loading benchmark clip...",
+                    benchmarkResults = emptyList()
+                )
+            }
+
+            val prepared = runCatching {
+                val (samples, sr) = AudioUtils.readWavFromAssets(appContext, clip.audioAssetPath)
+                val reference = appContext.assets.open(clip.transcriptAssetPath).bufferedReader().use { it.readText() }.trim()
+                Triple(samples, sr, reference)
+            }
+
+            if (prepared.isFailure) {
+                val message = prepared.exceptionOrNull()?.message ?: "Unknown error"
+                updateUi {
+                    it.copy(
+                        benchmarkRunning = false,
+                        benchmarkStatus = "Missing benchmark assets. Ensure benchmark clips exist under app/src/main/assets/benchmark-clips. Details: $message"
+                    )
+                }
+                return@launch
+            }
+
+            val (samples, sr, referenceText) = prepared.getOrThrow()
+            updateUi {
+                it.copy(
+                    benchmarkReferenceText = referenceText,
+                    benchmarkStatus = "Benchmark running..."
+                )
+            }
+
+            val baseState = _uiState.value
+            val languageHint = languageHintForClip(clip)
+            val results = mutableListOf<BenchmarkResult>()
+
+            fun publish(result: BenchmarkResult) {
+                results.add(result)
+                updateUi {
+                    it.copy(
+                        benchmarkResults = results.toList()
+                    )
+                }
+            }
+
+            suspend fun runOne(
+                engine: String,
+                modelName: String,
+                block: suspend () -> EngineTranscription
+            ) {
+                val output = runCatching { block() }
+                output.onSuccess { out ->
+                    val wer = Benchmarking.wordErrorRate(referenceText, out.text)
+                    val cer = Benchmarking.charErrorRate(referenceText, out.text)
+                    publish(
+                        BenchmarkResult(
+                            engine = engine,
+                            model = modelName,
+                            text = out.text,
+                            latencyMs = out.latencyMs,
+                            audioDurationSec = out.audioSec,
+                            realTimeFactor = if (out.audioSec > 0.0) out.latencyMs / 1000.0 / out.audioSec else null,
+                            wer = wer,
+                            cer = cer
+                        )
+                    )
+                }.onFailure { error ->
+                    publish(
+                        BenchmarkResult(
+                            engine = engine,
+                            model = modelName,
+                            error = error.message ?: "Unknown error"
+                        )
+                    )
+                }
+            }
+
+            if (baseState.benchmarkIncludeSherpa) {
+                val model = SherpaOnnxModelCatalog.models.find { it.id == baseState.sherpaModelId }
+                    ?: SherpaOnnxModelCatalog.models.first()
+                updateUi { it.copy(benchmarkStatus = "Benchmarking ${model.displayName}...") }
+                runOne("Sherpa-ONNX", model.displayName) {
+                    sherpaEngine.prepare(model.assetFolderOrFile, languageHint.language)
+                    val start = SystemClock.elapsedRealtime()
+                    val text = sherpaEngine.transcribe(samples, sr, languageHint.language, model.assetFolderOrFile)
+                    val latencyMs = SystemClock.elapsedRealtime() - start
+                    EngineTranscription(
+                        text = text.trim(),
+                        latencyMs = latencyMs,
+                        audioSec = samples.size.toDouble() / sr.toDouble()
+                    )
+                }
+            }
+
+            if (baseState.benchmarkIncludeNexa) {
+                val selectedModels = NexaModelCatalog.models.filter { baseState.benchmarkNexaModelIds.contains(it.id) }
+                for (model in selectedModels) {
+                    updateUi { it.copy(benchmarkStatus = "Benchmarking ${model.displayName}...") }
+                    runOne("Nexa SDK", model.displayName) {
+                        nexaEngine.prepareModel(model, languageHint.language)
+                        val out = nexaEngine.transcribe(samples, sr, model, languageHint.language)
+                        EngineTranscription(
+                            text = out.text,
+                            latencyMs = (out.processingSeconds * 1000.0).toLong(),
+                            audioSec = out.audioSeconds
+                        )
+                    }
+                }
+            }
+
+            if (baseState.benchmarkIncludeRunAnywhere) {
+                val selectedModels = RunAnywhereModelCatalog.models.filter {
+                    baseState.benchmarkRunAnywhereModelIds.contains(it.id)
+                }
+                for (model in selectedModels) {
+                    updateUi { it.copy(benchmarkStatus = "Benchmarking ${model.displayName}...") }
+                    runOne("RunAnywhere", model.displayName) {
+                        val out = transcribeRunAnywhereClipWithChunkFallback(
+                            samples = samples,
+                            sampleRate = sr,
+                            model = model,
+                            language = languageHint.language,
+                            detectLanguage = languageHint.detectLanguage
+                        )
+                        EngineTranscription(
+                            text = out.text,
+                            latencyMs = (out.processingSeconds * 1000.0).toLong(),
+                            audioSec = out.audioSeconds
+                        )
+                    }
+                }
+            }
+
+            updateUi {
+                it.copy(
+                    benchmarkRunning = false,
+                    benchmarkStatus = "Benchmark completed (${results.size} result(s))"
+                )
+            }
+        }
+    }
+
+    private suspend fun ensureSelectedModelInitialized(force: Boolean = false): Boolean {
+        val state = _uiState.value
+        val model = selectedModel(state)
+        val key = selectedModelKey(state)
+
+        if (!force && modelReadyKey == key && state.modelInitState == ModelInitState.READY) {
+            return true
+        }
+
+        updateUi {
+            it.copy(
+                modelInitState = ModelInitState.INITIALIZING,
+                modelInitMessage = "Initializing ${model.displayName}...",
+                status = "Initializing ${state.sttEngine.displayName}"
+            )
+        }
+
+        val result = runCatching {
+            when (state.sttEngine) {
+                SttEngineType.WHISPER -> {
+                    sherpaEngine.prepare(model.assetFolderOrFile, state.language)
+                }
+                SttEngineType.NEXA -> {
+                    nexaEngine.prepareModel(model, state.language)
+                }
+                SttEngineType.RUN_ANYWHERE -> {
+                    runAnywhereEngine.prepareModel(model)
+                }
+            }
+        }
+
+        return result.fold(
+            onSuccess = {
+                modelReadyKey = key
+                updateUi {
+                    it.copy(
+                        modelInitState = ModelInitState.READY,
+                        modelInitMessage = "Ready: ${model.displayName}",
+                        status = "Idle"
+                    )
+                }
+                log("Model initialized: ${model.displayName}")
+                true
+            },
+            onFailure = { error ->
+                modelReadyKey = null
+                updateUi {
+                    it.copy(
+                        modelInitState = ModelInitState.FAILED,
+                        modelInitMessage = "Initialization failed: ${error.message ?: "unknown"}",
+                        status = "Model init failed"
+                    )
+                }
+                log("Model initialization failed: ${error.message}", toast = true)
+                false
+            }
+        )
+    }
+
+    private suspend fun transcribeWithSelectedEngine(
+        samples: FloatArray,
+        isStreamingChunk: Boolean
+    ): EngineTranscription {
+        val state = _uiState.value
+        val model = selectedModel(state)
+
+        return when (state.sttEngine) {
+            SttEngineType.WHISPER -> {
+                val start = SystemClock.elapsedRealtime()
+                val text = sherpaEngine.transcribe(
+                    samples = samples,
+                    sampleRate = sampleRate,
+                    language = state.language,
+                    modelAssetPath = model.assetFolderOrFile
+                )
+                val latencyMs = SystemClock.elapsedRealtime() - start
+                EngineTranscription(
+                    text = text.trim(),
+                    latencyMs = latencyMs,
+                    audioSec = samples.size.toDouble() / sampleRate.toDouble()
+                )
+            }
+
+            SttEngineType.NEXA -> {
+                val output = nexaEngine.transcribe(
+                    samples = samples,
+                    sampleRate = sampleRate,
+                    model = model,
+                    language = state.language
+                )
+                EngineTranscription(
+                    text = output.text,
+                    latencyMs = (output.processingSeconds * 1000.0).toLong(),
+                    audioSec = output.audioSeconds
+                )
+            }
+
+            SttEngineType.RUN_ANYWHERE -> {
+                if (isStreamingChunk) {
+                    val output = runAnywhereEngine.transcribeStreamingChunk(
+                        samples = samples,
+                        sampleRate = sampleRate,
+                        model = model,
+                        language = state.language,
+                        detectLanguage = state.detectLanguage,
+                        preferNativeStreaming = true
+                    )
+                    EngineTranscription(
+                        text = output.text,
+                        latencyMs = (output.processingSeconds * 1000.0).toLong(),
+                        audioSec = output.audioSeconds,
+                        usedNativeStreaming = output.usedNativeStream,
+                        usedChunkFallback = output.fellBackToChunk
+                    )
+                } else {
+                    val output = transcribeRunAnywhereClipWithChunkFallback(
+                        samples = samples,
+                        sampleRate = sampleRate,
+                        model = model,
+                        language = state.language,
+                        detectLanguage = state.detectLanguage
+                    )
+                    EngineTranscription(
+                        text = output.text,
+                        latencyMs = (output.processingSeconds * 1000.0).toLong(),
+                        audioSec = output.audioSeconds
+                    )
+                }
+            }
+        }
+    }
+
+    private suspend fun transcribeRunAnywhereClipWithChunkFallback(
+        samples: FloatArray,
+        sampleRate: Int,
+        model: EngineModel,
+        language: String,
+        detectLanguage: Boolean
+    ): RunAnywhereClipResult {
+        val maxSecondsPerCall = 29.5
+        val totalAudioSec = if (sampleRate > 0) samples.size.toDouble() / sampleRate.toDouble() else 0.0
+        if (totalAudioSec <= maxSecondsPerCall) {
+            return runAnywhereEngine.transcribe(samples, sampleRate, model, language, detectLanguage)
+        }
+
+        val chunkSeconds = 25.0
+        val overlapSeconds = 1.0
+        val chunkSamples = (chunkSeconds * sampleRate).toInt().coerceAtLeast(sampleRate)
+        val overlapSamples = (overlapSeconds * sampleRate).toInt().coerceAtLeast(0)
+
+        var index = 0
+        var mergedText = ""
+        var totalProcessing = 0.0
+
+        while (index < samples.size) {
+            val end = min(samples.size, index + chunkSamples)
+            val chunk = samples.copyOfRange(index, end)
+            val output = runAnywhereEngine.transcribe(chunk, sampleRate, model, language, detectLanguage)
+            mergedText = mergeStreamingText(mergedText, output.text)
+            totalProcessing += output.processingSeconds
+
+            if (end >= samples.size) {
+                break
+            }
+            index = (end - overlapSamples).coerceAtLeast(index + 1)
+        }
+
+        return RunAnywhereClipResult(
+            text = mergedText.trim(),
+            processingSeconds = totalProcessing,
+            audioSeconds = totalAudioSec
+        )
+    }
+
+    private fun applyTranscriptionResult(result: EngineTranscription, replaceText: Boolean) {
+        val nextText = if (replaceText) {
+            result.text
+        } else {
+            mergeStreamingText(_uiState.value.transcription, result.text)
+        }
+
+        updatePerformance(result.latencyMs, result.audioSec)
+        updateUi {
+            it.copy(
+                transcription = nextText
+            )
+        }
+    }
+
+    private fun updatePerformance(latencyMs: Long, audioSec: Double) {
+        if (audioSec <= 0.0) return
+        val rtf = latencyMs / 1000.0 / audioSec
+
+        totalLatencyMs += latencyMs
+        totalRtf += rtf
+        statsCount += 1
+
+        updateUi {
+            it.copy(
+                performance = PerformanceStats(
+                    lastLatencyMs = latencyMs,
+                    avgLatencyMs = if (statsCount > 0) totalLatencyMs / statsCount else latencyMs,
+                    lastAudioSec = audioSec.toFloat(),
+                    lastRtf = rtf.toFloat(),
+                    avgRtf = if (statsCount > 0) (totalRtf / statsCount).toFloat() else rtf.toFloat()
+                )
+            )
+        }
+    }
+
+    private fun chunkConfig(state: AppUiState): ChunkConfig {
+        return when (state.sttEngine) {
+            SttEngineType.WHISPER -> ChunkConfig(chunkSeconds = 4.0f, overlapSeconds = 1.0f)
+            SttEngineType.NEXA -> ChunkConfig(
+                chunkSeconds = state.nexaChunkSeconds,
+                overlapSeconds = state.nexaOverlapSeconds
+            )
+            SttEngineType.RUN_ANYWHERE -> ChunkConfig(
+                chunkSeconds = state.runAnywhereChunkSeconds,
+                overlapSeconds = state.runAnywhereOverlapSeconds
+            )
+        }
+    }
+
+    private fun selectedModel(state: AppUiState): EngineModel {
+        return when (state.sttEngine) {
+            SttEngineType.WHISPER -> {
+                SherpaOnnxModelCatalog.models.find { it.id == state.sherpaModelId }
+                    ?: SherpaOnnxModelCatalog.models.first()
+            }
+            SttEngineType.NEXA -> {
+                NexaModelCatalog.models.find { it.id == state.nexaModelId }
+                    ?: NexaModelCatalog.models.first()
+            }
+            SttEngineType.RUN_ANYWHERE -> {
+                RunAnywhereModelCatalog.models.find { it.id == state.runAnywhereModelId }
+                    ?: RunAnywhereModelCatalog.models.first()
+            }
+        }
+    }
+
+    private fun selectedModelKey(state: AppUiState): String {
+        return when (state.sttEngine) {
+            SttEngineType.WHISPER -> "sherpa:${state.sherpaModelId}:${state.language}"
+            SttEngineType.NEXA -> "nexa:${state.nexaModelId}:${state.language}"
+            SttEngineType.RUN_ANYWHERE -> "runanywhere:${state.runAnywhereModelId}"
+        }
+    }
+
+    private fun invalidateModelInit(message: String) {
+        modelReadyKey = null
+        updateUi {
+            it.copy(
+                modelInitState = ModelInitState.NOT_INITIALIZED,
+                modelInitMessage = message
+            )
+        }
+    }
+
+    private fun startRecording(onChunk: (FloatArray) -> Unit) {
+        recordJob?.cancel()
+
+        val minBuffer = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
+            .coerceAtLeast(sampleRate)
+
+        val record = createAudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, minBuffer)
+            ?: createAudioRecord(MediaRecorder.AudioSource.MIC, minBuffer)
+
+        if (record == null) {
+            updateUi {
+                it.copy(
+                    isListening = false,
+                    status = "AudioRecord init failed"
+                )
+            }
+            log("AudioRecord init failed", toast = true)
+            return
+        }
+
         audioRecord = record
         enableAudioEffects(record)
         record.startRecording()
 
         recordJob = viewModelScope.launch(Dispatchers.IO) {
-            val buffer = ShortArray(minBuffer / 2)
-            while (_isListening.value) {
-                val read = audioRecord?.read(buffer, 0, buffer.size) ?: 0
+            val shortBuffer = ShortArray(minBuffer / 2)
+            while (_uiState.value.isListening) {
+                val read = audioRecord?.read(shortBuffer, 0, shortBuffer.size) ?: 0
                 if (read > 0) {
-                    onPcm(buffer, read)
+                    onChunk(AudioUtils.shortToFloat(shortBuffer, read))
                 }
             }
         }
     }
 
     private fun stopRecording() {
-        _isListening.value = false
+        updateUi { it.copy(isListening = false) }
         recordJob?.cancel()
         recordJob = null
+
         releaseAudioEffects()
-        audioRecord?.stop()
-        audioRecord?.release()
+        audioRecord?.let { record ->
+            runCatching { record.stop() }
+            runCatching { record.release() }
+        }
         audioRecord = null
     }
 
-    private fun toFloatArray(buffer: ShortArray, read: Int): FloatArray {
-        val out = FloatArray(read)
-        for (i in 0 until read) {
-            out[i] = buffer[i] / 32768.0f
+    private fun appendStreamWindow(chunk: FloatArray) {
+        synchronized(streamWindowLock) {
+            streamWindowChunks.addLast(chunk)
+            streamWindowSamples += chunk.size
         }
-        return out
     }
 
-    private fun flattenShortChunks(chunks: List<ShortArray>, sizes: List<Int>): FloatArray {
-        val total = sizes.sum()
-        val out = FloatArray(total)
-        var index = 0
-        for (i in chunks.indices) {
-            val chunk = chunks[i]
-            val size = sizes[i]
-            for (j in 0 until size) {
-                out[index++] = chunk[j] / 32768.0f
+    private fun snapshotStreamWindow(): FloatArray {
+        synchronized(streamWindowLock) {
+            val output = FloatArray(streamWindowSamples)
+            var index = 0
+            for (chunk in streamWindowChunks) {
+                System.arraycopy(chunk, 0, output, index, chunk.size)
+                index += chunk.size
             }
+            return output
         }
-        return out
+    }
+
+    private fun trimStreamWindow(keepSamples: Int) {
+        synchronized(streamWindowLock) {
+            if (keepSamples <= 0) {
+                streamWindowChunks.clear()
+                streamWindowSamples = 0
+                return
+            }
+
+            val reversed = streamWindowChunks.toList().asReversed()
+            val kept = ArrayDeque<FloatArray>()
+            var remaining = keepSamples
+
+            for (chunk in reversed) {
+                if (remaining <= 0) break
+                if (chunk.size <= remaining) {
+                    kept.addFirst(chunk)
+                    remaining -= chunk.size
+                } else {
+                    val tail = chunk.copyOfRange(chunk.size - remaining, chunk.size)
+                    kept.addFirst(tail)
+                    remaining = 0
+                }
+            }
+
+            streamWindowChunks.clear()
+            streamWindowChunks.addAll(kept)
+            streamWindowSamples = keepSamples - remaining
+        }
+    }
+
+    private fun currentWindowSamples(): Int {
+        synchronized(streamWindowLock) {
+            return streamWindowSamples
+        }
     }
 
     private fun flattenFloatChunks(chunks: List<FloatArray>): FloatArray {
@@ -343,121 +961,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return out
     }
 
-    private suspend fun transcribeWithStats(samples: FloatArray): Triple<String, Long, Float> {
-        val start = SystemClock.elapsedRealtime()
-        val text = sttEngine.transcribe(samples, sampleRate, _language.value)
-        val latencyMs = SystemClock.elapsedRealtime() - start
-        val audioSec = samples.size / sampleRate.toFloat()
-        return Triple(text, latencyMs, audioSec)
-    }
+    private fun mergeStreamingText(existing: String, incoming: String): String {
+        val cleanIncoming = incoming.trim()
+        if (cleanIncoming.isEmpty()) return existing
 
-    private fun updatePerformance(latencyMs: Long, audioSec: Float) {
-        if (audioSec <= 0f) return
-        val rtf = latencyMs / 1000f / audioSec
-        totalLatencyMs += latencyMs
-        totalRtf += rtf
-        statsCount += 1
-        _performance.value = PerformanceStats(
-            lastLatencyMs = latencyMs,
-            avgLatencyMs = totalLatencyMs / statsCount,
-            lastAudioSec = audioSec,
-            lastRtf = rtf,
-            avgRtf = totalRtf / statsCount
-        )
-    }
+        val cleanExisting = existing.trim()
+        if (cleanExisting.isEmpty()) return cleanIncoming
 
-    private fun appendStreamWindow(chunk: FloatArray) {
-        synchronized(streamWindowLock) {
-            streamWindowChunks.addLast(chunk)
-            streamWindowSamples += chunk.size
-        }
-    }
+        val existingWords = cleanExisting.split("\\s+".toRegex())
+        val incomingWords = cleanIncoming.split("\\s+".toRegex())
+        val maxOverlap = min(8, min(existingWords.size, incomingWords.size))
 
-    private fun snapshotStreamWindow(): FloatArray {
-        synchronized(streamWindowLock) {
-            val out = FloatArray(streamWindowSamples)
-            var index = 0
-            for (chunk in streamWindowChunks) {
-                System.arraycopy(chunk, 0, out, index, chunk.size)
-                index += chunk.size
-            }
-            return out
-        }
-    }
-
-    private fun trimStreamWindow(keepSamples: Int) {
-        synchronized(streamWindowLock) {
-            if (keepSamples <= 0) {
-                streamWindowChunks.clear()
-                streamWindowSamples = 0
-                return
-            }
-            val out = ArrayDeque<FloatArray>()
-            var remaining = keepSamples
-            val chunks = streamWindowChunks.toList().asReversed()
-            for (chunk in chunks) {
-                if (remaining <= 0) break
-                if (chunk.size <= remaining) {
-                    out.addFirst(chunk)
-                    remaining -= chunk.size
-                } else {
-                    val tail = chunk.copyOfRange(chunk.size - remaining, chunk.size)
-                    out.addFirst(tail)
-                    remaining = 0
-                }
-            }
-            streamWindowChunks.clear()
-            streamWindowChunks.addAll(out)
-            streamWindowSamples = keepSamples - remaining
-        }
-    }
-
-    private fun currentWindowSamples(): Int {
-        synchronized(streamWindowLock) {
-            return streamWindowSamples
-        }
-    }
-
-    private fun mergeStreamingText(confirmed: String, newText: String): String {
-        val cleanNew = newText.trim()
-        if (cleanNew.isEmpty()) return confirmed
-        val cleanConfirmed = confirmed.trim()
-        if (cleanConfirmed.isEmpty()) return cleanNew
-
-        val confirmedWords = cleanConfirmed.split("\\s+".toRegex())
-        val newWords = cleanNew.split("\\s+".toRegex())
-        val maxCheck = min(6, min(confirmedWords.size, newWords.size))
-        for (k in maxCheck downTo 1) {
-            val suffix = confirmedWords.takeLast(k).joinToString(" ")
-            val prefix = newWords.take(k).joinToString(" ")
+        for (k in maxOverlap downTo 1) {
+            val suffix = existingWords.takeLast(k).joinToString(" ")
+            val prefix = incomingWords.take(k).joinToString(" ")
             if (suffix.equals(prefix, ignoreCase = true)) {
-                val merged = confirmedWords.dropLast(k) + newWords
-                return merged.joinToString(" ")
+                return (existingWords.dropLast(k) + incomingWords).joinToString(" ")
             }
         }
-        return "$cleanConfirmed $cleanNew".trim()
-    }
-
-    private fun log(message: String, toast: Boolean = false) {
-        Log.d(tag, message)
-        if (toast) {
-            toastFlow.tryEmit(message)
-        }
-    }
-
-    private fun resolveDefaultLanguage(): String {
-        return "auto"
+        return "$cleanExisting $cleanIncoming"
     }
 
     private fun createAudioRecord(source: Int, bufferSize: Int): AudioRecord? {
         return try {
-            val record = AudioRecord(
-                source,
-                sampleRate,
-                channelConfig,
-                audioFormat,
-                bufferSize
-            )
+            val record = AudioRecord(source, sampleRate, channelConfig, audioFormat, bufferSize)
             if (record.state != AudioRecord.STATE_INITIALIZED) {
                 record.release()
                 null
@@ -497,10 +1024,70 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         agc = null
     }
 
+    private fun ensureTts() {
+        if (tts != null) return
+
+        tts = TextToSpeech(getApplication()) { status ->
+            val success = status == TextToSpeech.SUCCESS
+            updateUi { it.copy(ttsReady = success) }
+            if (!success) {
+                log("TTS initialization failed", toast = true)
+                return@TextToSpeech
+            }
+
+            tts?.language = Locale.getDefault()
+            tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) {
+                    updateUi { it.copy(isSpeaking = true) }
+                }
+
+                override fun onDone(utteranceId: String?) {
+                    updateUi {
+                        it.copy(
+                            isSpeaking = false,
+                            status = "Idle"
+                        )
+                    }
+                }
+
+                override fun onError(utteranceId: String?) {
+                    updateUi {
+                        it.copy(
+                            isSpeaking = false,
+                            status = "TTS error"
+                        )
+                    }
+                    log("TTS error", toast = true)
+                }
+            })
+        }
+    }
+
+    private fun languageHintForClip(clip: BenchmarkClip): LanguageHint {
+        return when (clip.id) {
+            "fleurs_ja_clip_4" -> LanguageHint(language = "ja", detectLanguage = false)
+            "fleurs_zh_clip_5" -> LanguageHint(language = "zh", detectLanguage = false)
+            "fleurs_zh_en_mix_clip_6" -> LanguageHint(language = "auto", detectLanguage = true)
+            else -> LanguageHint(language = "en", detectLanguage = false)
+        }
+    }
+
+    private fun updateUi(transform: (AppUiState) -> AppUiState) {
+        _uiState.update(transform)
+    }
+
+    private fun log(message: String, toast: Boolean = false) {
+        Log.d(tag, message)
+        if (toast) {
+            toastFlow.tryEmit(message)
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
         stopRecording()
-        sttEngine.close()
+        sherpaEngine.close()
+        nexaEngine.close()
         tts?.stop()
         tts?.shutdown()
         tts = null

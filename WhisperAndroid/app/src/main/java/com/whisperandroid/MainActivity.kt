@@ -5,10 +5,12 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,15 +20,19 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -34,11 +40,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.whisperandroid.ui.theme.WhisperAndroidTheme
@@ -57,18 +63,9 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun MainScreen(viewModel: MainViewModel = viewModel()) {
+    val ui by viewModel.uiState.collectAsState()
     val context = LocalContext.current
-    val mode by viewModel.mode.collectAsState()
-    val sttMode by viewModel.sttMode.collectAsState()
-    val status by viewModel.status.collectAsState()
-    val transcription by viewModel.transcription.collectAsState()
-    val performance by viewModel.performance.collectAsState()
-    val ttsText by viewModel.ttsText.collectAsState()
-    val isListening by viewModel.isListening.collectAsState()
-    val isSpeaking by viewModel.isSpeaking.collectAsState()
-    val ttsReady by viewModel.ttsReady.collectAsState()
-    val language by viewModel.language.collectAsState()
-    val languageOptions = viewModel.languageOptions
+    val languageOptions = remember { viewModel.getLanguageOptions() }
 
     var hasMicPermission by remember {
         mutableStateOf(
@@ -84,7 +81,7 @@ private fun MainScreen(viewModel: MainViewModel = viewModel()) {
     ) { granted ->
         hasMicPermission = granted
         if (!granted) {
-            Toast.makeText(context, "Mic permission denied", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Microphone permission denied", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -97,131 +94,488 @@ private fun MainScreen(viewModel: MainViewModel = viewModel()) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Text(
             text = "WhisperAndroid",
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.SemiBold
         )
-        Text(text = "Model: Whisper tiny (multilingual)")
-        Spacer(modifier = Modifier.height(12.dp))
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ToggleButton(
-                label = "STT",
-                selected = mode == MainMode.STT
-            ) { viewModel.setMode(MainMode.STT) }
-            ToggleButton(
-                label = "TTS",
-                selected = mode == MainMode.TTS
-            ) { viewModel.setMode(MainMode.TTS) }
+            ModeButton("STT", ui.mode == AppMode.STT) { viewModel.setMode(AppMode.STT) }
+            ModeButton("TTS", ui.mode == AppMode.TTS) { viewModel.setMode(AppMode.TTS) }
+            ModeButton("Benchmark", ui.mode == AppMode.BENCHMARK) { viewModel.setMode(AppMode.BENCHMARK) }
+        }
+
+        StatusCard(ui = ui, onInitModel = { viewModel.initializeSelectedModel() })
+
+        when (ui.mode) {
+            AppMode.STT -> {
+                SttPanel(
+                    ui = ui,
+                    languageOptions = languageOptions,
+                    hasMicPermission = hasMicPermission,
+                    onRequestMic = { permissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+                    onSetEngine = viewModel::setSttEngine,
+                    onSetMode = viewModel::setSttMode,
+                    onSetLanguage = viewModel::setLanguage,
+                    onSetDetectLanguage = viewModel::setDetectLanguage,
+                    onSetSherpaModel = viewModel::setSherpaModel,
+                    onSetNexaModel = viewModel::setNexaModel,
+                    onSetRunAnywhereModel = viewModel::setRunAnywhereModel,
+                    onNexaChunkChange = viewModel::setNexaChunkSeconds,
+                    onNexaOverlapChange = viewModel::setNexaOverlapSeconds,
+                    onRaChunkChange = viewModel::setRunAnywhereChunkSeconds,
+                    onRaOverlapChange = viewModel::setRunAnywhereOverlapSeconds,
+                    onStartClip = viewModel::startClip,
+                    onStopClip = viewModel::stopClipAndTranscribe,
+                    onStartStreaming = viewModel::startStreaming,
+                    onStopStreaming = viewModel::stopStreaming
+                )
+            }
+
+            AppMode.TTS -> {
+                TtsPanel(
+                    ui = ui,
+                    onUpdateText = viewModel::updateTtsText,
+                    onSpeak = viewModel::startSpeaking,
+                    onStop = viewModel::stopSpeaking
+                )
+            }
+
+            AppMode.BENCHMARK -> {
+                BenchmarkPanel(
+                    ui = ui,
+                    onSetClip = viewModel::setBenchmarkClip,
+                    onToggleIncludeSherpa = viewModel::toggleBenchmarkIncludeSherpa,
+                    onToggleIncludeNexa = viewModel::toggleBenchmarkIncludeNexa,
+                    onToggleIncludeRunAnywhere = viewModel::toggleBenchmarkIncludeRunAnywhere,
+                    onToggleNexaModel = viewModel::toggleBenchmarkNexaModel,
+                    onToggleRunAnywhereModel = viewModel::toggleBenchmarkRunAnywhereModel,
+                    onRun = viewModel::runBenchmark
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+    }
+}
 
-        Text(text = "Status: $status")
-        Spacer(modifier = Modifier.height(12.dp))
+@Composable
+private fun StatusCard(ui: AppUiState, onInitModel: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text("Status: ${ui.status}")
+            Text("Engine: ${ui.sttEngine.displayName}")
+            Text("Model Init: ${ui.modelInitMessage}")
 
-        when (mode) {
-            MainMode.STT -> {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ToggleButton(
-                        label = "Streaming",
-                        selected = sttMode == SttMode.STREAMING
-                    ) { viewModel.setSttMode(SttMode.STREAMING) }
-                    ToggleButton(
-                        label = "Clip",
-                        selected = sttMode == SttMode.CLIP
-                    ) { viewModel.setSttMode(SttMode.CLIP) }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Text(text = "Language")
+            if (ui.modelInitState == ModelInitState.INITIALIZING) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
+                    verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    for (code in languageOptions) {
-                        ToggleButton(
-                            label = code.uppercase(),
-                            selected = language == code
-                        ) { viewModel.setLanguage(code) }
-                    }
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Text("Initializing model...")
                 }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                if (!hasMicPermission) {
-                    Button(onClick = { permissionLauncher.launch(Manifest.permission.RECORD_AUDIO) }) {
-                        Text("Grant mic permission")
-                    }
-                } else {
-                    val buttonLabel = if (isListening) {
-                        if (sttMode == SttMode.STREAMING) "Stop Streaming" else "Stop Clip"
-                    } else {
-                        if (sttMode == SttMode.STREAMING) "Start Streaming" else "Start Clip"
-                    }
-
-                    Button(onClick = {
-                        if (!isListening) {
-                            if (sttMode == SttMode.STREAMING) {
-                                viewModel.startStreaming()
-                            } else {
-                                viewModel.startClip()
-                            }
-                        } else {
-                            if (sttMode == SttMode.STREAMING) {
-                                viewModel.stopStreaming()
-                            } else {
-                                viewModel.stopClipAndTranscribe()
-                            }
-                        }
-                    }) {
-                        Text(buttonLabel)
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                TranscriptionBox(transcription = transcription)
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                PerformanceSection(performance = performance)
             }
 
-            MainMode.TTS -> {
-                TextField(
-                    value = ttsText,
-                    onValueChange = { viewModel.updateTtsText(it) },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Text to speak") }
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { viewModel.startSpeaking() }) {
-                        Text(if (isSpeaking) "Speaking..." else "Speak")
-                    }
-                    OutlinedButton(onClick = { viewModel.stopSpeaking() }) {
-                        Text("Stop")
-                    }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onInitModel) {
+                    Text("Init/Reload Model")
                 }
-
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(text = if (ttsReady) "TTS ready" else "TTS initializing...")
+                if (ui.isProcessing) {
+                    Text("Processing...", modifier = Modifier.align(Alignment.CenterVertically))
+                }
             }
         }
     }
 }
 
 @Composable
-private fun ToggleButton(label: String, selected: Boolean, onClick: () -> Unit) {
+private fun SttPanel(
+    ui: AppUiState,
+    languageOptions: List<String>,
+    hasMicPermission: Boolean,
+    onRequestMic: () -> Unit,
+    onSetEngine: (SttEngineType) -> Unit,
+    onSetMode: (SttMode) -> Unit,
+    onSetLanguage: (String) -> Unit,
+    onSetDetectLanguage: (Boolean) -> Unit,
+    onSetSherpaModel: (String) -> Unit,
+    onSetNexaModel: (String) -> Unit,
+    onSetRunAnywhereModel: (String) -> Unit,
+    onNexaChunkChange: (Float) -> Unit,
+    onNexaOverlapChange: (Float) -> Unit,
+    onRaChunkChange: (Float) -> Unit,
+    onRaOverlapChange: (Float) -> Unit,
+    onStartClip: () -> Unit,
+    onStopClip: () -> Unit,
+    onStartStreaming: () -> Unit,
+    onStopStreaming: () -> Unit
+) {
+    Text("STT Engine", fontWeight = FontWeight.Medium)
+    SelectableRow(items = SttEngineType.entries.map { it.displayName }, selected = ui.sttEngine.displayName) { label ->
+        SttEngineType.entries.firstOrNull { it.displayName == label }?.let(onSetEngine)
+    }
+
+    val engineModels = when (ui.sttEngine) {
+        SttEngineType.WHISPER -> SherpaOnnxModelCatalog.models
+        SttEngineType.NEXA -> NexaModelCatalog.models
+        SttEngineType.RUN_ANYWHERE -> RunAnywhereModelCatalog.models
+    }
+    val selectedModelId = when (ui.sttEngine) {
+        SttEngineType.WHISPER -> ui.sherpaModelId
+        SttEngineType.NEXA -> ui.nexaModelId
+        SttEngineType.RUN_ANYWHERE -> ui.runAnywhereModelId
+    }
+
+    Text("Model", fontWeight = FontWeight.Medium)
+    SelectableRow(
+        items = engineModels.map { it.displayName },
+        selected = engineModels.firstOrNull { it.id == selectedModelId }?.displayName
+    ) { label ->
+        val model = engineModels.firstOrNull { it.displayName == label } ?: return@SelectableRow
+        when (ui.sttEngine) {
+            SttEngineType.WHISPER -> onSetSherpaModel(model.id)
+            SttEngineType.NEXA -> onSetNexaModel(model.id)
+            SttEngineType.RUN_ANYWHERE -> onSetRunAnywhereModel(model.id)
+        }
+    }
+
+    Text("Mode", fontWeight = FontWeight.Medium)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        ModeButton("Clip", ui.sttMode == SttMode.CLIP) { onSetMode(SttMode.CLIP) }
+        ModeButton("Streaming", ui.sttMode == SttMode.STREAMING) { onSetMode(SttMode.STREAMING) }
+    }
+
+    Text("Language", fontWeight = FontWeight.Medium)
+    SelectableRow(items = languageOptions, selected = ui.language) { onSetLanguage(it) }
+
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        ModeButton("Detect ON", ui.detectLanguage) { onSetDetectLanguage(true) }
+        ModeButton("Detect OFF", !ui.detectLanguage) { onSetDetectLanguage(false) }
+    }
+
+    when (ui.sttEngine) {
+        SttEngineType.NEXA -> {
+            ChunkControl(
+                label = "Nexa Chunk (s)",
+                value = ui.nexaChunkSeconds,
+                onChange = onNexaChunkChange
+            )
+            ChunkControl(
+                label = "Nexa Overlap (s)",
+                value = ui.nexaOverlapSeconds,
+                onChange = onNexaOverlapChange
+            )
+        }
+
+        SttEngineType.RUN_ANYWHERE -> {
+            ChunkControl(
+                label = "RunAnywhere Chunk (s)",
+                value = ui.runAnywhereChunkSeconds,
+                onChange = onRaChunkChange
+            )
+            ChunkControl(
+                label = "RunAnywhere Overlap (s)",
+                value = ui.runAnywhereOverlapSeconds,
+                onChange = onRaOverlapChange
+            )
+        }
+
+        SttEngineType.WHISPER -> {
+            Text("Sherpa-ONNX streaming uses fixed chunk 4.0s / overlap 1.0s")
+        }
+    }
+
+    if (!hasMicPermission) {
+        Button(onClick = onRequestMic) {
+            Text("Grant microphone permission")
+        }
+    } else {
+        val buttonLabel = when {
+            !ui.isListening && ui.sttMode == SttMode.CLIP -> "Start Clip"
+            ui.isListening && ui.sttMode == SttMode.CLIP -> "Stop Clip + Transcribe"
+            !ui.isListening && ui.sttMode == SttMode.STREAMING -> "Start Streaming"
+            else -> "Stop Streaming"
+        }
+
+        Button(onClick = {
+            when (ui.sttMode) {
+                SttMode.CLIP -> if (ui.isListening) onStopClip() else onStartClip()
+                SttMode.STREAMING -> if (ui.isListening) onStopStreaming() else onStartStreaming()
+            }
+        }) {
+            Text(buttonLabel)
+        }
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(220.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+    ) {
+        val transcriptionScroll = rememberScrollState()
+        LaunchedEffect(ui.transcription) {
+            transcriptionScroll.animateScrollTo(transcriptionScroll.maxValue)
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(10.dp)
+                .verticalScroll(transcriptionScroll)
+        ) {
+            Text(if (ui.transcription.isBlank()) "(No transcription yet)" else ui.transcription)
+        }
+    }
+
+    PerformanceSection(ui.performance)
+}
+
+@Composable
+private fun TtsPanel(
+    ui: AppUiState,
+    onUpdateText: (String) -> Unit,
+    onSpeak: () -> Unit,
+    onStop: () -> Unit
+) {
+    OutlinedTextField(
+        value = ui.ttsText,
+        onValueChange = onUpdateText,
+        modifier = Modifier.fillMaxWidth(),
+        label = { Text("Text to speak") }
+    )
+
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(onClick = onSpeak) {
+            Text(if (ui.isSpeaking) "Speaking..." else "Speak")
+        }
+        OutlinedButton(onClick = onStop) {
+            Text("Stop")
+        }
+    }
+
+    Text(if (ui.ttsReady) "TTS ready" else "TTS initializing...")
+}
+
+@Composable
+private fun BenchmarkPanel(
+    ui: AppUiState,
+    onSetClip: (String) -> Unit,
+    onToggleIncludeSherpa: () -> Unit,
+    onToggleIncludeNexa: () -> Unit,
+    onToggleIncludeRunAnywhere: () -> Unit,
+    onToggleNexaModel: (String) -> Unit,
+    onToggleRunAnywhereModel: (String) -> Unit,
+    onRun: () -> Unit
+) {
+    Text("Benchmark Clip", fontWeight = FontWeight.Medium)
+    SelectableRow(
+        items = BenchmarkClipCatalog.clips.map { it.displayName },
+        selected = BenchmarkClipCatalog.clips.firstOrNull { it.id == ui.benchmarkClipId }?.displayName
+    ) { selectedLabel ->
+        BenchmarkClipCatalog.clips.firstOrNull { it.displayName == selectedLabel }?.let {
+            onSetClip(it.id)
+        }
+    }
+
+    HorizontalDivider()
+
+    Text("Include Engines", fontWeight = FontWeight.Medium)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        ModeButton("Sherpa-ONNX", ui.benchmarkIncludeSherpa, onToggleIncludeSherpa)
+        ModeButton("Nexa", ui.benchmarkIncludeNexa, onToggleIncludeNexa)
+        ModeButton("RunAnywhere", ui.benchmarkIncludeRunAnywhere, onToggleIncludeRunAnywhere)
+    }
+
+    if (ui.benchmarkIncludeNexa) {
+        Text("Nexa Models", fontWeight = FontWeight.Medium)
+        SelectableRow(
+            items = NexaModelCatalog.models.map { it.displayName },
+            selectedSet = ui.benchmarkNexaModelIds.mapNotNull { id ->
+                NexaModelCatalog.models.find { it.id == id }?.displayName
+            }.toSet()
+        ) { label ->
+            NexaModelCatalog.models.firstOrNull { it.displayName == label }?.let {
+                onToggleNexaModel(it.id)
+            }
+        }
+    }
+
+    if (ui.benchmarkIncludeRunAnywhere) {
+        Text("RunAnywhere Models", fontWeight = FontWeight.Medium)
+        SelectableRow(
+            items = RunAnywhereModelCatalog.models.map { it.displayName },
+            selectedSet = ui.benchmarkRunAnywhereModelIds.mapNotNull { id ->
+                RunAnywhereModelCatalog.models.find { it.id == id }?.displayName
+            }.toSet()
+        ) { label ->
+            RunAnywhereModelCatalog.models.firstOrNull { it.displayName == label }?.let {
+                onToggleRunAnywhereModel(it.id)
+            }
+        }
+    }
+
+    Button(
+        onClick = onRun,
+        enabled = !ui.benchmarkRunning
+    ) {
+        if (ui.benchmarkRunning) {
+            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+            Spacer(modifier = Modifier.size(8.dp))
+        }
+        Text(if (ui.benchmarkRunning) "Running..." else "Run Benchmark")
+    }
+
+    Text("Benchmark Status: ${ui.benchmarkStatus}")
+
+    if (ui.benchmarkReferenceText.isNotBlank()) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+            )
+        ) {
+            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Reference Transcript", fontWeight = FontWeight.Medium)
+                Text(ui.benchmarkReferenceText)
+            }
+        }
+    }
+
+    if (ui.benchmarkResults.isNotEmpty()) {
+        Text("Results", fontWeight = FontWeight.SemiBold)
+        ui.benchmarkResults.forEach { result ->
+            BenchmarkResultCard(result)
+        }
+    }
+}
+
+@Composable
+private fun BenchmarkResultCard(result: BenchmarkResult) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text("${result.engine} - ${result.model}", fontWeight = FontWeight.SemiBold)
+            if (result.error != null) {
+                Text("Error: ${result.error}", color = MaterialTheme.colorScheme.error)
+            } else {
+                Text("Latency: ${result.latencyMs ?: 0} ms")
+                Text(
+                    "RTF: ${result.realTimeFactor?.let { "%.2f".format(it) } ?: "-"} | " +
+                        "WER: ${result.wer?.let { "%.2f".format(it) } ?: "-"} | " +
+                        "CER: ${result.cer?.let { "%.2f".format(it) } ?: "-"}"
+                )
+                Text(if (result.text.isBlank()) "(empty)" else result.text)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PerformanceSection(performance: PerformanceStats) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text("Performance", fontWeight = FontWeight.Medium)
+            Text("Latency: ${performance.lastLatencyMs} ms (avg ${performance.avgLatencyMs} ms)")
+            Text("Audio: ${"%.2f".format(performance.lastAudioSec)} s")
+            Text(
+                "RTF: ${"%.2f".format(performance.lastRtf)} " +
+                    "(avg ${"%.2f".format(performance.avgRtf)})"
+            )
+        }
+    }
+}
+
+@Composable
+private fun ChunkControl(label: String, value: Float, onChange: (Float) -> Unit) {
+    var text by remember(value) { mutableStateOf("%.1f".format(value)) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, fontWeight = FontWeight.Medium)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedButton(onClick = {
+                val next = (value - 0.2f).coerceAtLeast(0f)
+                onChange(next)
+                text = "%.1f".format(next)
+            }) {
+                Text("-")
+            }
+            OutlinedTextField(
+                value = text,
+                onValueChange = {
+                    text = it
+                    it.toFloatOrNull()?.let(onChange)
+                },
+                modifier = Modifier.weight(1f),
+                singleLine = true
+            )
+            OutlinedButton(onClick = {
+                val next = value + 0.2f
+                onChange(next)
+                text = "%.1f".format(next)
+            }) {
+                Text("+")
+            }
+        }
+    }
+}
+
+@Composable
+private fun SelectableRow(
+    items: List<String>,
+    selected: String? = null,
+    selectedSet: Set<String> = emptySet(),
+    onSelected: (String) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        items.forEach { label ->
+            val isSelected = selected == label || selectedSet.contains(label)
+            ModeButton(label, isSelected) { onSelected(label) }
+        }
+    }
+}
+
+@Composable
+private fun ModeButton(label: String, selected: Boolean, onClick: () -> Unit) {
     val colors = if (selected) {
         ButtonDefaults.outlinedButtonColors(
             containerColor = MaterialTheme.colorScheme.primary,
@@ -233,44 +587,9 @@ private fun ToggleButton(label: String, selected: Boolean, onClick: () -> Unit) 
 
     OutlinedButton(
         onClick = onClick,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
-        colors = colors
+        colors = colors,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
     ) {
         Text(label)
-    }
-}
-
-@Composable
-private fun TranscriptionBox(transcription: String) {
-    val scrollState = rememberScrollState()
-
-    LaunchedEffect(transcription) {
-        scrollState.animateScrollTo(scrollState.maxValue)
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(240.dp)
-            .verticalScroll(scrollState)
-            .padding(12.dp)
-    ) {
-        Text(
-            text = if (transcription.isBlank()) "(No transcription yet)" else transcription,
-            fontSize = 16.sp
-        )
-    }
-}
-
-@Composable
-private fun PerformanceSection(performance: PerformanceStats) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        Text("Performance", fontWeight = FontWeight.Medium)
-        Text("Latency: ${performance.lastLatencyMs} ms (avg ${performance.avgLatencyMs} ms)")
-        Text("Audio: ${"%.2f".format(performance.lastAudioSec)} s")
-        Text("RTF: ${"%.2f".format(performance.lastRtf)} (avg ${"%.2f".format(performance.avgRtf)})")
     }
 }

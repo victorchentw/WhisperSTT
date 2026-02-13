@@ -23,14 +23,24 @@ local.properties
 .venv/
 
 # Local clones
-WhisperKit/
-whisper/
+/WhisperKit/
+/whisper/
 
 # Local binary backups
 third_party/runanywhere-sdks/sdk/runanywhere-swift/Binaries.local-backup-*/
 
-# Large model archives
-WhisperAndroid/app/src/main/assets/models/whisper/tiny/*.tar.bz2
+# Android AI model artifacts (download locally via scripts/bootstrap_android_models.sh)
+WhisperAndroid/app/src/main/assets/models/whisper/tiny/**
+!WhisperAndroid/app/src/main/assets/models/whisper/tiny/.keep
+
+WhisperAndroid/app/src/main/assets/models/nexa/whisper/**
+!WhisperAndroid/app/src/main/assets/models/nexa/whisper/.keep
+
+WhisperAndroid/app/src/main/assets/models/runanywhere/whisper-tiny-onnx/**
+!WhisperAndroid/app/src/main/assets/models/runanywhere/whisper-tiny-onnx/.keep
+
+WhisperAndroid/app/src/main/assets/models/runanywhere/whisper-base-onnx/**
+!WhisperAndroid/app/src/main/assets/models/runanywhere/whisper-base-onnx/.keep
 
 # iOS AI model artifacts (download locally via scripts/bootstrap_ios_models.sh)
 WhisperiOS/Models/nexa/parakeet-tdt-0.6b-v3-ane/**
